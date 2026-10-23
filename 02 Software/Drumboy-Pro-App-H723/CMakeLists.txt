@@ -16,6 +16,45 @@ endif()
 
 project(Drumboy-Pro-App-H723 C CXX ASM)
 
+# Firmware version "<base>-cy.<build>", e.g. 1.01-cy.1:
+#   base  = stock Randomwaves version (kVersionMajor/kVersionMinor in Global.h, owned upstream);
+#           shown by the bootloader during an SD-card update (major 0-9, minor 00-99)
+#   build = cyberyak build number, the only content of the VERSION file ("cy.1")
+set(_GLOBAL_H "${CMAKE_CURRENT_SOURCE_DIR}/Core/Library/Global/Global.h")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" "${_GLOBAL_H}")
+
+file(STRINGS "${_GLOBAL_H}" _VERSION_LINES REGEX "kVersion(Major|Minor) +=")
+if(NOT _VERSION_LINES MATCHES "kVersionMajor += 0x([0-9A-Fa-f]+)")
+    message(FATAL_ERROR "Could not read kVersionMajor from Global.h")
+endif()
+math(EXPR FW_VERSION_MAJOR "0x${CMAKE_MATCH_1}")
+if(NOT _VERSION_LINES MATCHES "kVersionMinor += 0x([0-9A-Fa-f]+)")
+    message(FATAL_ERROR "Could not read kVersionMinor from Global.h")
+endif()
+math(EXPR FW_VERSION_MINOR "0x${CMAKE_MATCH_1}")
+if((FW_VERSION_MAJOR GREATER 9) OR (FW_VERSION_MINOR GREATER 99))
+    message(FATAL_ERROR "Base version ${FW_VERSION_MAJOR}.${FW_VERSION_MINOR} exceeds the bootloader limits (0-9 / 00-99)")
+endif()
+
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" _BUILD LIMIT_COUNT 1)
+if(NOT _BUILD MATCHES "^cy\\.([0-9]+)$")
+    message(FATAL_ERROR "VERSION must look like cy.1, got '${_BUILD}'")
+endif()
+set(FW_BUILD_NUMBER ${CMAKE_MATCH_1})
+
+math(EXPR _MINOR2 "${FW_VERSION_MINOR}" OUTPUT_FORMAT DECIMAL)
+if(FW_VERSION_MINOR LESS 10)
+    set(_MINOR2 "0${FW_VERSION_MINOR}")
+endif()
+set(_BUILD2 "${FW_BUILD_NUMBER}")
+if(FW_BUILD_NUMBER LESS 10)
+    set(_BUILD2 "0${FW_BUILD_NUMBER}")
+endif()
+set(FW_VERSION "${FW_VERSION_MAJOR}.${_MINOR2}-cy.${FW_BUILD_NUMBER}")
+set(FW_PACKAGE "Drumboy_Pro_Fw_0${FW_VERSION_MAJOR}_${_MINOR2}_cy${_BUILD2}.bin")  # <= 32 chars (bootloader LFN limit)
+file(WRITE "${CMAKE_BINARY_DIR}/version.txt" "${FW_VERSION}\n")
+message(STATUS "Drumboy Pro firmware ${FW_VERSION} -> ${FW_PACKAGE}")
+
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_EXTENSIONS ON)
 set(CMAKE_CXX_STANDARD 14)
@@ -24,7 +63,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(MCU_FLAGS -mcpu=cortex-m7 -mfpu=fpv5-d16 -mfloat-abi=hard -mthumb)
 
-option(DRUMBOY_CPU_METER "Show audio/main-loop CPU load at the top of the screen" OFF)
+option(DRUMBOY_PLUGINS "Plugin host, hooks and built-in plugins (Core/Plugin), enabled via Plugins/plugins.txt" ON)
+option(DRUMBOY_BRANDING "Show the custom build label (CYBERYAK <version>) on screen" ON)
 
 file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS
     Core/*.c Core/*.cpp Core/*.s
@@ -49,6 +89,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     Core/Library/Lcd
     Core/Library/Dac
     Core/Library/Controller
+    Core/Plugin
 )
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE
@@ -56,7 +97,9 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
     USE_HAL_DRIVER
     STM32H723xx
     $<$<CONFIG:Debug>:DEBUG>
-    $<$<BOOL:${DRUMBOY_CPU_METER}>:DRUMBOY_CPU_METER>
+    $<$<BOOL:${DRUMBOY_PLUGINS}>:DRUMBOY_PLUGINS>
+    $<$<BOOL:${DRUMBOY_BRANDING}>:DRUMBOY_BRANDING>
+    DRUMBOY_BUILD_NUMBER=${FW_BUILD_NUMBER}
 )
 
 target_compile_options(${PROJECT_NAME} PRIVATE
@@ -76,15 +119,6 @@ target_link_options(${PROJECT_NAME} PRIVATE
     -static
 )
 target_link_libraries(${PROJECT_NAME} PRIVATE -Wl,--start-group c m stdc++ supc++ -Wl,--end-group)
-
-# Version shown by the bootloader during an SD-card update (major < 10, minor < 100).
-set(FW_VERSION_MAJOR 1 CACHE STRING "Firmware package version major")
-set(FW_VERSION_MINOR 1 CACHE STRING "Firmware package version minor")
-math(EXPR _FW_MINOR_PADDED "${FW_VERSION_MINOR}" OUTPUT_FORMAT DECIMAL)
-if(FW_VERSION_MINOR LESS 10)
-    set(_FW_MINOR_PADDED "0${FW_VERSION_MINOR}")
-endif()
-set(FW_PACKAGE "Drumboy_Pro_Fw_0${FW_VERSION_MAJOR}_${_FW_MINOR_PADDED}.bin")
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 

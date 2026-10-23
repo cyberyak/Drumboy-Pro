@@ -1,0 +1,6 @@
+# Drumboy Pro plugins (cyberyak firmware)
+# Set a plugin to "on" to enable it, then power-cycle the Drumboy.
+# Plugins not listed here, or if this file is missing, stay off.
+
+cpu_meter = off        # Audio and main-loop CPU load (green line, top-left)
+hook_monitor = off     # Developer tool: latest step/note/key/encoder/MIDI events (cyan line)

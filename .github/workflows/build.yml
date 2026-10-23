@@ -1,9 +1,9 @@
 # Builds the application firmware and the SD-card update package.
 #
 #   push / pull request : build, upload package as a workflow artifact
-#   tag vX.YY (e.g. v1.50) : build with that version and publish a GitHub Release
-#
-# The bootloader limits versions to major 0-9 and minor 0-99.
+#   tag v<base>-cy.<build> (e.g. v1.01-cy.1) : publish a GitHub Release; the tag must
+#                            match the version CMake derives from Global.h + VERSION,
+#                            notes come from the matching CHANGELOG.md section
 
 name: Build firmware
 
@@ -44,38 +44,30 @@ jobs:
       - name: Install Ninja
         run: sudo apt-get update -qq && sudo apt-get install -y -qq ninja-build
 
-      - name: Resolve firmware version
-        id: version
-        run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            ver="${GITHUB_REF_NAME#v}"
-            if [[ ! "$ver" =~ ^[0-9]\.[0-9]{1,2}$ ]]; then
-              echo "::error::Tag must look like v1.50 (major 0-9, minor 0-99)"; exit 1
-            fi
-            major="${ver%%.*}"
-            minor="$((10#${ver#*.}))"
-          else
-            major=1; minor=1
-          fi
-          echo "major=$major" >> "$GITHUB_OUTPUT"
-          echo "minor=$minor" >> "$GITHUB_OUTPUT"
-
-      - name: Build (Debug preset, matches official firmware)
+      - name: Build (Debug preset, release build)
         working-directory: ${{ env.APP_DIR }}
         run: |
           export PATH="$HOME/arm-gnu-toolchain/bin:$PATH"
-          cmake --preset Debug \
-            -DFW_VERSION_MAJOR=${{ steps.version.outputs.major }} \
-            -DFW_VERSION_MINOR=${{ steps.version.outputs.minor }}
+          cmake --preset Debug
           cmake --build --preset Debug
 
-      - name: Build (CpuMeter preset, development tool)
+      - name: Check version
+        id: version
+        run: |
+          ver="$(tr -d '[:space:]' < "$APP_DIR/build/Debug/version.txt")"
+          echo "Firmware version $ver"
+          if [[ "$GITHUB_REF" == refs/tags/v* && "$GITHUB_REF_NAME" != "v$ver" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match firmware version $ver. Bump VERSION first."; exit 1
+          fi
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+
+      - name: Build (Stock preset, identical to official firmware)
         if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         working-directory: ${{ env.APP_DIR }}
         run: |
           export PATH="$HOME/arm-gnu-toolchain/bin:$PATH"
-          cmake --preset CpuMeter
-          cmake --build --preset CpuMeter
+          cmake --preset Stock
+          cmake --build --preset Stock
 
       - name: Upload firmware
         uses: actions/upload-artifact@v4
@@ -91,8 +83,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          ver="${{ steps.version.outputs.version }}"
+          {
+            awk -v v="$ver" '$0 ~ "^## \\[" v "\\]" {on=1; next} on && /^## \[/ {exit} on' CHANGELOG.md
+            echo
+            echo "**Install:** copy \`Drumboy_Pro_Fw_*.bin\` to the root of the SD card (no other firmware file there) and power-cycle the Drumboy."
+            echo "**Plugins:** copy \`plugins.txt\` to \`Plugins/plugins.txt\` on the SD card and set a plugin to \`on\` to enable it."
+            echo "To go back to stock, do the same with the official package from \`02 Software/Firmware/\`."
+          } > release-notes.md
           gh release create "$GITHUB_REF_NAME" \
             "$APP_DIR"/build/Debug/Drumboy_Pro_Fw_*.bin \
-            --title "Drumboy Pro firmware $GITHUB_REF_NAME" \
-            --notes "Copy \`Drumboy_Pro_Fw_*.bin\` to the root of the SD card and power-cycle the Drumboy. To go back to stock, do the same with the official package from \`02 Software/Firmware/\`." \
-            --generate-notes
+            "02 Software/Sd Card/Plugins/plugins.txt" \
+            --title "Drumboy Pro $ver (cyberyak build ${ver##*-cy.}, based on Randomwaves ${ver%%-*})" \
+            --notes-file release-notes.md
