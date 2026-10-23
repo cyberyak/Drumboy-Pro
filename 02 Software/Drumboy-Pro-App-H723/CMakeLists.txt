@@ -24,6 +24,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(MCU_FLAGS -mcpu=cortex-m7 -mfpu=fpv5-d16 -mfloat-abi=hard -mthumb)
 
+option(DRUMBOY_CPU_METER "Show audio/main-loop CPU load at the top of the screen" OFF)
+
 file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS
     Core/*.c Core/*.cpp Core/*.s
     FATFS/*.c
@@ -54,6 +56,7 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
     USE_HAL_DRIVER
     STM32H723xx
     $<$<CONFIG:Debug>:DEBUG>
+    $<$<BOOL:${DRUMBOY_CPU_METER}>:DRUMBOY_CPU_METER>
 )
 
 target_compile_options(${PROJECT_NAME} PRIVATE

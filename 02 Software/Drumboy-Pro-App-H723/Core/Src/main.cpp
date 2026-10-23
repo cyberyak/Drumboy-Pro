@@ -1,6 +1,7 @@
 #include "main.h"
 
 #include "Controller.h"
+#include "Profiler.h"
 #include "bdma.h"
 #include "dma.h"
 #include "fatfs.h"
@@ -68,7 +69,10 @@ int main() {
 
     // Main Loop
     while (true) {
+        PROFILE_LOOP_BEGIN();
         controller.update();
+        PROFILE_LOOP_END();
+        if (controller.getMenu() != INIT_MENU) PROFILE_DRAW(controller.lcd);
     }
 }
 
@@ -288,14 +292,18 @@ void HAL_TIM_ErrorCallback(TIM_HandleTypeDef* htim) {}
 // 1. Half Transfer (Process First 32 Samples)
 void HAL_I2SEx_TxRxHalfCpltCallback(I2S_HandleTypeDef* hi2s) {
     if (hi2s->Instance == SPI3) {
+        PROFILE_AUDIO_BEGIN();
         controller.processAudioBlock(&i2s_rxBuffer[0], &i2s_txBuffer[0]);
+        PROFILE_AUDIO_END();
     }
 }
 
 // 2. Complete Transfer (Process Second 32 Samples)
 void HAL_I2SEx_TxRxCpltCallback(I2S_HandleTypeDef* hi2s) {
     if (hi2s->Instance == SPI3) {
+        PROFILE_AUDIO_BEGIN();
         controller.processAudioBlock(&i2s_rxBuffer[I2S_BLOCK_SIZE * 2], &i2s_txBuffer[I2S_BLOCK_SIZE * 2]);
+        PROFILE_AUDIO_END();
     }
 }
 
