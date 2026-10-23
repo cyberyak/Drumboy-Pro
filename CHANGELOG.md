@@ -10,6 +10,19 @@ Custom Drumboy Pro firmware by cyberyak (fork of [Randomwaves/Drumboy-Pro](https
 
 ## [Unreleased]
 
+## [1.01-cy.2]
+
+Lua script plugins.
+
+### Added
+- **Lua 5.4 plugins**: every `Plugins/*.lua` file on the SD card is a plugin, enabled in `plugins.txt` like the built-ins. Callbacks `on_load`, `on_step`, `on_note`, `on_key`, `on_encoder`, `on_midi_in`, `on_midi_out`, `on_frame`; API `screen.*`, `sys.millis/memory`, `print`. Reference: `Plugins/README.md`.
+- Sandbox: no `io`/`os`/`require`/`load`/bytecode; per-script limits of 48 KB memory and 2 ms per event / 10 ms per frame / 300 ms to load. Errors stop only that script and are shown in red in the top strip; `print()` output is shown there too.
+- Lua heap: 96 KB in DTCM (memory the stock firmware never used); about 20 KB per typical script.
+- Example plugins `hello.lua` (template with every callback) and `step_dots.lua` (16 step dots in the top-right corner).
+- `DRUMBOY_LUA` build option (on by default).
+
+Cost versus 1.01-cy.1: +136 KB flash (Lua engine and float formatting), +2 KB main RAM.
+
 ## [1.01-cy.1]
 
 First custom release, based on Randomwaves 1.01: a plugin-capable firmware with two built-in plugins. With no plugins enabled it behaves exactly like stock, apart from the build label.

@@ -18,6 +18,8 @@ class Plugin {
     virtual const char* id() const = 0;                                 // Key in Plugins/plugins.txt, e.g. "cpu_meter"
     virtual const char* name() const = 0;                               // Display name
 
+    virtual bool onStart() { return true; }                             // Once at boot when enabled; false = stays off
+    virtual bool isActive() const { return true; }                      // False after a runtime failure
     virtual void onEvent(const PluginEvent& event) { (void)event; }    // Called once per queued event
     virtual void onFrame(Lcd& lcd) { (void)lcd; }                      // Called at kPluginFrameInterval
 
@@ -27,6 +29,7 @@ class Plugin {
 
 void pluginHost_register(Plugin* plugin);
 uint32_t pluginHost_getDroppedEvents();
+void pluginHost_message(const char* text, bool error);                  // Shown in the top strip for a few seconds
 
 #endif
 

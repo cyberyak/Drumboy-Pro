@@ -88,11 +88,11 @@ jobs:
             awk -v v="$ver" '$0 ~ "^## \\[" v "\\]" {on=1; next} on && /^## \[/ {exit} on' CHANGELOG.md
             echo
             echo "**Install:** copy \`Drumboy_Pro_Fw_*.bin\` to the root of the SD card (no other firmware file there) and power-cycle the Drumboy."
-            echo "**Plugins:** copy \`plugins.txt\` to \`Plugins/plugins.txt\` on the SD card and set a plugin to \`on\` to enable it."
+            echo "**Plugins:** copy \`plugins.txt\` and the \`.lua\` files into a \`Plugins\` folder on the SD card and set a plugin to \`on\` in \`plugins.txt\` to enable it (API: \`README.md\`)."
             echo "To go back to stock, do the same with the official package from \`02 Software/Firmware/\`."
           } > release-notes.md
           gh release create "$GITHUB_REF_NAME" \
             "$APP_DIR"/build/Debug/Drumboy_Pro_Fw_*.bin \
-            "02 Software/Sd Card/Plugins/plugins.txt" \
+            "02 Software/Sd Card/Plugins/"* \
             --title "Drumboy Pro $ver (cyberyak build ${ver##*-cy.}, based on Randomwaves ${ver%%-*})" \
             --notes-file release-notes.md
