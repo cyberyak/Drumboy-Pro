@@ -28,7 +28,7 @@ static Plugin* plugins[kPluginMaxCount];
 static uint8_t pluginCount = 0;
 static uint32_t lastFrameTick = 0;
 
-void registerBuiltinPlugins();  // BuiltinPlugins.cpp
+void registerBuiltinPlugins();  // HookMonitor.cpp (moves to its own file once there is more than one plugin)
 
 void pluginHost_initialize() {
     /// @brief Registers compiled-in plugins. Called once after controller.initialize().
