@@ -1,5 +1,6 @@
 #include "main.h"
 
+#include "Branding.h"
 #include "Controller.h"
 #include "PluginHooks.h"
 #include "Profiler.h"
@@ -77,6 +78,7 @@ int main() {
         if (controller.getMenu() != INIT_MENU) {
             PLUGIN_UPDATE(controller.lcd);
             PROFILE_DRAW(controller.lcd);
+            BRANDING_DRAW(controller.lcd, controller.getMenu() == FILE_MENU);
         }
     }
 }

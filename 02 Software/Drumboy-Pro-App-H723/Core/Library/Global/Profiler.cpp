@@ -11,14 +11,9 @@
 const uint32_t kProfilerDrawInterval                = 500;              // ms between screen updates
 const uint16_t kProfilerTextX                       = 20;               // Top-left strip, empty in all stock layouts
 const uint16_t kProfilerTextY                       = 6;
-const uint16_t kProfilerTextSize                    = 112;
+const uint16_t kProfilerTextSize                    = 96;
 
 // clang-format on
-
-#ifndef DRUMBOY_VERSION_MAJOR
-#define DRUMBOY_VERSION_MAJOR 0
-#define DRUMBOY_VERSION_MINOR 0
-#endif
 
 /* Audio Statistics (written in I2S interrupt) ----------------------*/
 
@@ -111,8 +106,7 @@ void profiler_draw(Lcd& lcd) {
     loopCount = 0;
 
     char text[kProfilerTextSize];
-    int len = snprintf(text, sizeof(text), "V%u.%02u  AUDIO AVG %3lu.%lu%% PEAK %3lu.%lu%% BLK %4luUS   LOOP AVG %6luUS MAX %6luUS %6luHZ  ",
-                       DRUMBOY_VERSION_MAJOR, DRUMBOY_VERSION_MINOR,
+    int len = snprintf(text, sizeof(text), "AUDIO AVG %3lu.%lu%% PEAK %3lu.%lu%% BLK %4luUS   LOOP AVG %6luUS MAX %6luUS %6luHZ  ",
                        avgPermille / 10, avgPermille % 10, peakPermille / 10, peakPermille % 10, blockUs,
                        loopAvgUs, loopMaxUs, loopHz);
     if (len <= 0) return;

@@ -10,9 +10,15 @@
         },
         {
             "name": "Debug",
-            "displayName": "Debug (-Ofast, matches official firmware)",
+            "displayName": "Debug (-Ofast, release build with CYBERYAK label)",
             "inherits": "base",
             "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+        },
+        {
+            "name": "Stock",
+            "displayName": "Stock (Debug without any additions, identical to official firmware)",
+            "inherits": "base",
+            "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "DRUMBOY_BRANDING": "OFF" }
         },
         {
             "name": "Release",
@@ -35,6 +41,7 @@
     ],
     "buildPresets": [
         { "name": "Debug", "configurePreset": "Debug" },
+        { "name": "Stock", "configurePreset": "Stock" },
         { "name": "Release", "configurePreset": "Release" },
         { "name": "CpuMeter", "configurePreset": "CpuMeter" },
         { "name": "PluginDev", "configurePreset": "PluginDev" }
