@@ -2,6 +2,19 @@
 
 Copy this folder to the SD card as `Plugins/`. Enable plugins in `plugins.txt` (`name = on`) and power-cycle the Drumboy.
 
+## Plugin & Firmware Manager (on the device)
+
+Press **FILE** to open the File menu, then press **FILE** again. The manager appears in the song lanes:
+
+| Control | Does |
+|---|---|
+| **UP / DOWN** or knob 1 | Move the cursor |
+| **CENTER** | Plugins page: switch the selected plugin on/off. Firmware page: press twice to install (see `Firmware/README.md`) |
+| **LEFT / RIGHT** | Switch between the PLUGINS and FIRMWARE pages |
+| **FILE** | Close; plugin changes are saved to `plugins.txt` and apply after a restart |
+
+While the manager is open the sequencer keeps playing, but the other keys and knobs are paused. It does not open while recording.
+
 ## Lua plugins
 
 Each `.lua` file in this folder is one plugin; its name is the file name without `.lua` (max 23 characters). Up to 8 Lua plugins are listed; enabled ones are loaded at boot.

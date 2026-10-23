@@ -368,7 +368,7 @@ void Controller::update() {
         led_action();
 
         // Push buffered graphical changes to the LCD.
-        lcd_update();
+        if (!PLUGIN_INPUT_CAPTURED()) lcd_update();
 
         // 4. FILESYSTEM MAINTENANCE
         // Recover SD subsystem if media access is lost.
@@ -1558,6 +1558,12 @@ void Controller::keyboard_action() {
         if (keyboard.keyLayer.read) PLUGIN_KEYPAD(0, keyboard.keyLayer.changeState, kLayerLibrarySize);
         if (keyboard.keyLeft.read) PLUGIN_KEYPAD(1, keyboard.keyLeft.changeState, 16);
         if (keyboard.keyRight.read) PLUGIN_KEYPAD(2, keyboard.keyRight.changeState, 16);
+        if (PLUGIN_INPUT_CAPTURED()) {
+            keyboard.keyLayer.read = false;
+            keyboard.keyLeft.read = false;
+            keyboard.keyRight.read = false;
+            return;
+        }
 
         // 2. LAYER KEYPAD DISPATCH
         if (keyboard.keyLayer.read) {
@@ -3074,6 +3080,7 @@ void Controller::encoder_action() {
             // Process only events promoted by encoder_read().
             if (enc.read) {
                 PLUGIN_EVENT(PLUGIN_EVENT_ENCODER, encNum_, (enc.actionCurrent == ENC_INC) ? 1 : -1, 0);
+                if (PLUGIN_INPUT_CAPTURED()) enc.actionCurrent = ENC_NONE;
                 switch (enc.mode) {
                         // --- LOCAL MODE ---
                         // Use menu-bound function mapping.

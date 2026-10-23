@@ -10,6 +10,20 @@ Custom Drumboy Pro firmware by cyberyak (fork of [Randomwaves/Drumboy-Pro](https
 
 ## [Unreleased]
 
+## [1.01-cy.3]
+
+Plugin & Firmware Manager.
+
+### Added
+- **Plugin & Firmware Manager**: in the File menu, press FILE again. It draws in the song lanes (restored on close) and owns keys and knobs while open; the sequencer keeps playing. Not available while recording.
+- **Plugins page**: every built-in and Lua plugin with ON/OFF and RUNNING state; CENTER toggles; changes are written to `Plugins/plugins.txt` on close and apply after a restart.
+- **Firmware page**: lists valid update files in a `Firmware/` folder on the SD card (e.g. stock 1.01 and cyberyak builds). CENTER twice copies the selected file to the SD root with a CRC check and restarts, so the bootloader installs it; the library copy is kept.
+- Releases also attach the official stock package, so the `Firmware/` library can be filled from one release.
+
+### Changed
+- Plugin host takes the Controller (instead of its FIL) and separates "configured" from "running" plugins.
+- Controller gains two read-only getters (`getActiveSongBank`, `isRecording`); stock keyboard/encoder dispatch and `lcd_update()` pause while the manager is open.
+
 ## [1.01-cy.2]
 
 Lua script plugins.

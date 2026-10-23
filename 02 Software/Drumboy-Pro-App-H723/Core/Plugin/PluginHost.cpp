@@ -5,8 +5,8 @@
 #include <ctype.h>
 #include <strings.h>
 
-#include "Lcd.h"
-#include "ff.h"
+#include "Controller.h"
+#include "Manager.h"
 
 // clang-format off
 
@@ -36,9 +36,10 @@ static volatile uint32_t droppedEvents = 0;
 /* Registry ---------------------------------------------------------*/
 
 static Plugin* plugins[kPluginMaxCount];
-static bool pluginEnabled[kPluginMaxCount];
+static bool pluginConfigured[kPluginMaxCount];                          // Wanted: plugins.txt / manager
+static bool pluginRunning[kPluginMaxCount];                             // Started successfully at boot
 static uint8_t pluginCount = 0;
-static uint8_t enabledCount = 0;
+static uint8_t runningCount = 0;
 static uint32_t lastFrameTick = 0;
 
 /* Message Line -----------------------------------------------------*/
@@ -55,7 +56,7 @@ void registerLuaPlugins(FIL& file);    // LuaPlugin.cpp
 #endif
 
 void pluginHost_message(const char* text, bool error) {
-    /// @brief Queues a one-line message (Lua print() or error) for the top strip; the latest one wins.
+    /// @brief Queues a one-line message (Lua print(), errors, manager status) for the top strip; the latest one wins.
 
     strncpy(messageText, text, sizeof(messageText) - 1);
     messageText[sizeof(messageText) - 1] = '\0';
@@ -85,6 +86,8 @@ static void drawMessage(Lcd& lcd) {
         messageTick = tick;
     }
 }
+
+/* Configuration ----------------------------------------------------*/
 
 static bool isEnabledValue(const char* value) {
     return (strcasecmp(value, "on") == 0) || (strcasecmp(value, "yes") == 0) || (strcasecmp(value, "true") == 0) || (strcmp(value, "1") == 0);
@@ -126,16 +129,68 @@ static void loadConfig(FIL& file) {
             const char* value = trim(equals + 1);
 
             for (uint8_t i = 0; i < pluginCount; i++) {
-                if (strcasecmp(key, plugins[i]->id()) == 0) pluginEnabled[i] = isEnabledValue(value);
+                if (strcasecmp(key, plugins[i]->id()) == 0) pluginConfigured[i] = isEnabledValue(value);
             }
         }
         line = next;
     }
 }
 
-void pluginHost_initialize(FIL& file) {
+bool pluginHost_saveConfig(FIL& file) {
+    /// @brief Rewrites Plugins/plugins.txt with every known plugin (comments in the old file are not kept).
+
+    // 1. COMPOSE (static buffer in DMA-reachable RAM_D1)
+    static char text[1024] __attribute__((aligned(32)));
+    int len = snprintf(text, sizeof(text),
+                       "# Drumboy Pro plugins (cyberyak firmware), written by the Plugin & Firmware Manager.\n"
+                       "# Set a plugin to \"on\" to enable it, then power-cycle the Drumboy.\n\n");
+    for (uint8_t i = 0; (i < pluginCount) && (len < (int)sizeof(text)); i++) {
+        len += snprintf(&text[len], sizeof(text) - len, "%s = %s\n", plugins[i]->id(), pluginConfigured[i] ? "on" : "off");
+    }
+    if (len >= (int)sizeof(text)) len = sizeof(text) - 1;
+
+    // 2. WRITE
+    f_mkdir("Plugins");  // Fails harmlessly if it exists
+    if (f_open(&file, kPluginConfigPath, FA_WRITE | FA_CREATE_ALWAYS) != FR_OK) return false;
+    UINT written = 0;
+    FRESULT result = f_write(&file, text, len, &written);
+    f_close(&file);
+    return (result == FR_OK) && ((int)written == len);
+}
+
+/* Registry Access --------------------------------------------------*/
+
+uint8_t pluginHost_getCount() { return pluginCount; }
+Plugin* pluginHost_getPlugin(uint8_t index) { return (index < pluginCount) ? plugins[index] : nullptr; }
+bool pluginHost_isConfigured(uint8_t index) { return (index < pluginCount) && pluginConfigured[index]; }
+bool pluginHost_isRunning(uint8_t index) { return (index < pluginCount) && pluginRunning[index] && plugins[index]->isActive(); }
+
+void pluginHost_setConfigured(uint8_t index, bool on) {
+    if (index < pluginCount) pluginConfigured[index] = on;
+}
+
+void pluginHost_register(Plugin* plugin) {
+    if ((plugin != nullptr) && (pluginCount < kPluginMaxCount)) {
+        plugins[pluginCount] = plugin;
+        pluginConfigured[pluginCount] = false;
+        pluginRunning[pluginCount] = false;
+        pluginCount++;
+    }
+}
+
+uint32_t pluginHost_getDroppedEvents() {
+    return droppedEvents;
+}
+
+/* Lifecycle --------------------------------------------------------*/
+
+void pluginHost_initialize(Controller& controller) {
     /// @brief Registers built-in and Lua plugins, applies Plugins/plugins.txt and starts the enabled ones.
-    /// Called once after controller.initialize(); borrows the controller's idle FIL (4 KB).
+    /// Called once after controller.initialize(). Borrows the controller's idle FIL (4 KB) and takes the
+    /// keypad lock the controller uses around SD access.
+
+    FIL& file = controller.sd.file;
+    controller.keyboard_disable();
 
     // 1. DISCOVER
     registerBuiltinPlugins();
@@ -147,24 +202,20 @@ void pluginHost_initialize(FIL& file) {
     loadConfig(file);
 
     // 3. START ENABLED PLUGINS (a failed start leaves the plugin off)
-    enabledCount = 0;
+    runningCount = 0;
     for (uint8_t i = 0; i < pluginCount; i++) {
-        if (pluginEnabled[i] && !plugins[i]->onStart()) pluginEnabled[i] = false;
-        if (pluginEnabled[i]) enabledCount++;
+        pluginRunning[i] = pluginConfigured[i] && plugins[i]->onStart();
+        if (pluginRunning[i]) runningCount++;
     }
+
+    controller.keyboard_enable();
 }
 
-void pluginHost_register(Plugin* plugin) {
-    if ((plugin != nullptr) && (pluginCount < kPluginMaxCount)) {
-        plugins[pluginCount] = plugin;
-        pluginEnabled[pluginCount] = false;
-        pluginCount++;
-    }
+bool pluginHost_isCapturing() {
+    return manager_isOpen();
 }
 
-uint32_t pluginHost_getDroppedEvents() {
-    return droppedEvents;
-}
+/* Events -----------------------------------------------------------*/
 
 void pluginHost_push(PluginEventType type, uint8_t a, uint8_t b, uint8_t c) {
     /// @brief Enqueues an event; safe from any interrupt priority and from already-masked sections.
@@ -205,21 +256,26 @@ void pluginHost_pushKeypad(uint8_t keypad, const uint8_t* changeState, uint8_t c
     }
 }
 
-void pluginHost_update(Lcd& lcd) {
-    /// @brief Main-loop pass: dispatches queued events, then frames at kPluginFrameInterval.
+void pluginHost_update(Controller& controller) {
+    /// @brief Main-loop pass: dispatches queued events (manager first), then frames at kPluginFrameInterval.
+
+    Lcd& lcd = controller.lcd;
 
     // 1. EVENT DISPATCH (bounded per pass so the UI stays responsive)
     for (uint8_t n = 0; (n < kPluginMaxEventsPerUpdate) && (queueTail != queueHead); n++) {
         PluginEvent event = queue[queueTail];
         queueTail = (queueTail + 1) & (kPluginQueueSize - 1);
 
+        if (manager_handleEvent(event, controller)) continue;  // Keys/knobs used by the open manager
+
         for (uint8_t i = 0; i < pluginCount; i++) {
-            if (pluginEnabled[i] && plugins[i]->isActive()) plugins[i]->onEvent(event);
+            if (pluginRunning[i] && plugins[i]->isActive()) plugins[i]->onEvent(event);
         }
     }
+    manager_endUpdate(controller);
 
     // 2. FRAME
-    if ((enabledCount == 0) && !messagePending && !messageShown) return;
+    if ((runningCount == 0) && !manager_isOpen() && !manager_needsFrame() && !messagePending && !messageShown) return;
     uint32_t tick = HAL_GetTick();
     if ((tick - lastFrameTick) < kPluginFrameInterval) return;
     lastFrameTick = tick;
@@ -233,8 +289,9 @@ void pluginHost_update(Lcd& lcd) {
     RGB16Color back = lcd.getBackColor();
 
     for (uint8_t i = 0; i < pluginCount; i++) {
-        if (pluginEnabled[i] && plugins[i]->isActive()) plugins[i]->onFrame(lcd);
+        if (pluginRunning[i] && plugins[i]->isActive()) plugins[i]->onFrame(lcd);
     }
+    manager_frame(controller);
     drawMessage(lcd);
 
     lcd.setFont(font);
