@@ -13,11 +13,16 @@
 /* Settings ---------------------------------------------------------*/
 
 const uint16_t kPluginQueueSize                     = 128;              // Power of two
-const uint8_t  kPluginMaxCount                      = 8;
+const uint8_t  kPluginMaxCount                      = 16;               // Built-ins + Lua scripts
 const uint8_t  kPluginMaxEventsPerUpdate            = 32;               // Bounds main-loop time per pass
 const uint32_t kPluginFrameInterval                 = 33;               // ms (~30 fps)
 const char     kPluginConfigPath[]                  = "Plugins/plugins.txt";
 const uint16_t kPluginConfigMaxSize                 = 512;
+const uint32_t kPluginMessageTime                   = 6000;             // ms a message stays on screen
+const uint16_t kPluginMessageX                      = 20;
+const uint16_t kPluginMessageY                      = 16;               // Second line of the empty top strip
+const uint16_t kPluginMessageWidth                  = 920;
+const uint8_t  kPluginMessageSize                   = 140;
 
 // clang-format on
 
@@ -36,7 +41,50 @@ static uint8_t pluginCount = 0;
 static uint8_t enabledCount = 0;
 static uint32_t lastFrameTick = 0;
 
-void registerBuiltinPlugins();  // BuiltinPlugins.cpp
+/* Message Line -----------------------------------------------------*/
+
+static char messageText[kPluginMessageSize] = "";
+static bool messageError = false;
+static bool messagePending = false;
+static bool messageShown = false;
+static uint32_t messageTick = 0;
+
+void registerBuiltinPlugins();         // BuiltinPlugins.cpp
+#ifdef DRUMBOY_LUA
+void registerLuaPlugins(FIL& file);    // LuaPlugin.cpp
+#endif
+
+void pluginHost_message(const char* text, bool error) {
+    /// @brief Queues a one-line message (Lua print() or error) for the top strip; the latest one wins.
+
+    strncpy(messageText, text, sizeof(messageText) - 1);
+    messageText[sizeof(messageText) - 1] = '\0';
+    for (char* c = messageText; *c != '\0'; c++) {
+        if ((*c == '\n') || (*c == '\t')) *c = ' ';
+    }
+    messageError = error;
+    messagePending = true;
+}
+
+static void drawMessage(Lcd& lcd) {
+    /// @brief Draws a pending message, and clears it after kPluginMessageTime. Caller guards LCD state.
+
+    uint32_t tick = HAL_GetTick();
+    if (messagePending || (messageShown && ((tick - messageTick) >= kPluginMessageTime))) {
+        lcd.setBackColor(BLACK);
+        lcd.clearRect(kPluginMessageX, kPluginMessageY - 1, kPluginMessageWidth, 9);
+        messageShown = false;
+    }
+    if (messagePending) {
+        lcd.setFont(FONT_05x07);
+        lcd.setAlignment(LEFT);
+        lcd.setForeColor(messageError ? RED : WHITE);
+        lcd.drawText(messageText, strlen(messageText), kPluginMessageX, kPluginMessageY);
+        messagePending = false;
+        messageShown = true;
+        messageTick = tick;
+    }
+}
 
 static bool isEnabledValue(const char* value) {
     return (strcasecmp(value, "on") == 0) || (strcasecmp(value, "yes") == 0) || (strcasecmp(value, "true") == 0) || (strcmp(value, "1") == 0);
@@ -83,20 +131,27 @@ static void loadConfig(FIL& file) {
         }
         line = next;
     }
-
-    // 3. COUNT ENABLED
-    enabledCount = 0;
-    for (uint8_t i = 0; i < pluginCount; i++) {
-        if (pluginEnabled[i]) enabledCount++;
-    }
 }
 
 void pluginHost_initialize(FIL& file) {
-    /// @brief Registers compiled-in plugins and applies Plugins/plugins.txt. Called once after controller.initialize().
-    /// Borrows the controller's idle FIL (4 KB) instead of keeping a second one.
+    /// @brief Registers built-in and Lua plugins, applies Plugins/plugins.txt and starts the enabled ones.
+    /// Called once after controller.initialize(); borrows the controller's idle FIL (4 KB).
 
+    // 1. DISCOVER
     registerBuiltinPlugins();
+#ifdef DRUMBOY_LUA
+    registerLuaPlugins(file);
+#endif
+
+    // 2. CONFIGURE
     loadConfig(file);
+
+    // 3. START ENABLED PLUGINS (a failed start leaves the plugin off)
+    enabledCount = 0;
+    for (uint8_t i = 0; i < pluginCount; i++) {
+        if (pluginEnabled[i] && !plugins[i]->onStart()) pluginEnabled[i] = false;
+        if (pluginEnabled[i]) enabledCount++;
+    }
 }
 
 void pluginHost_register(Plugin* plugin) {
@@ -159,12 +214,12 @@ void pluginHost_update(Lcd& lcd) {
         queueTail = (queueTail + 1) & (kPluginQueueSize - 1);
 
         for (uint8_t i = 0; i < pluginCount; i++) {
-            if (pluginEnabled[i]) plugins[i]->onEvent(event);
+            if (pluginEnabled[i] && plugins[i]->isActive()) plugins[i]->onEvent(event);
         }
     }
 
     // 2. FRAME
-    if (enabledCount == 0) return;
+    if ((enabledCount == 0) && !messagePending && !messageShown) return;
     uint32_t tick = HAL_GetTick();
     if ((tick - lastFrameTick) < kPluginFrameInterval) return;
     lastFrameTick = tick;
@@ -178,8 +233,9 @@ void pluginHost_update(Lcd& lcd) {
     RGB16Color back = lcd.getBackColor();
 
     for (uint8_t i = 0; i < pluginCount; i++) {
-        if (pluginEnabled[i]) plugins[i]->onFrame(lcd);
+        if (pluginEnabled[i] && plugins[i]->isActive()) plugins[i]->onFrame(lcd);
     }
+    drawMessage(lcd);
 
     lcd.setFont(font);
     lcd.setSpacing(spacing);
