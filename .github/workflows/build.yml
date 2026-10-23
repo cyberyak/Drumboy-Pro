@@ -1,0 +1,90 @@
+# Builds the application firmware and the SD-card update package.
+#
+#   push / pull request : build, upload package as a workflow artifact
+#   tag vX.YY (e.g. v1.50) : build with that version and publish a GitHub Release
+#
+# The bootloader limits versions to major 0-9 and minor 0-99.
+
+name: Build firmware
+
+on:
+  push:
+    branches: [dev, main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  ARM_GCC_VERSION: 14.2.rel1
+  APP_DIR: 02 Software/Drumboy-Pro-App-H723
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Arm GNU toolchain
+        id: cache-gcc
+        uses: actions/cache@v4
+        with:
+          path: ~/arm-gnu-toolchain
+          key: arm-gnu-toolchain-${{ env.ARM_GCC_VERSION }}-linux-x86_64
+
+      - name: Install Arm GNU toolchain
+        if: steps.cache-gcc.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/arm-gnu-toolchain
+          curl -fsSL "https://developer.arm.com/-/media/Files/downloads/gnu/${ARM_GCC_VERSION}/binrel/arm-gnu-toolchain-${ARM_GCC_VERSION}-x86_64-arm-none-eabi.tar.xz" \
+            | tar -xJ -C ~/arm-gnu-toolchain --strip-components=1
+
+      - name: Install Ninja
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ninja-build
+
+      - name: Resolve firmware version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            ver="${GITHUB_REF_NAME#v}"
+            if [[ ! "$ver" =~ ^[0-9]\.[0-9]{1,2}$ ]]; then
+              echo "::error::Tag must look like v1.50 (major 0-9, minor 0-99)"; exit 1
+            fi
+            major="${ver%%.*}"
+            minor="$((10#${ver#*.}))"
+          else
+            major=1; minor=1
+          fi
+          echo "major=$major" >> "$GITHUB_OUTPUT"
+          echo "minor=$minor" >> "$GITHUB_OUTPUT"
+
+      - name: Build (Debug preset, matches official firmware)
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          export PATH="$HOME/arm-gnu-toolchain/bin:$PATH"
+          cmake --preset Debug \
+            -DFW_VERSION_MAJOR=${{ steps.version.outputs.major }} \
+            -DFW_VERSION_MINOR=${{ steps.version.outputs.minor }}
+          cmake --build --preset Debug
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: drumboy-pro-firmware-${{ github.sha }}
+          path: |
+            ${{ env.APP_DIR }}/build/Debug/Drumboy_Pro_Fw_*.bin
+            ${{ env.APP_DIR }}/build/Debug/Drumboy-Pro-App-H723.elf
+            ${{ env.APP_DIR }}/build/Debug/Drumboy-Pro-App-H723.map
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "$APP_DIR"/build/Debug/Drumboy_Pro_Fw_*.bin \
+            --title "Drumboy Pro firmware $GITHUB_REF_NAME" \
+            --notes "Copy \`Drumboy_Pro_Fw_*.bin\` to the root of the SD card and power-cycle the Drumboy. To go back to stock, do the same with the official package from \`02 Software/Firmware/\`." \
+            --generate-notes
