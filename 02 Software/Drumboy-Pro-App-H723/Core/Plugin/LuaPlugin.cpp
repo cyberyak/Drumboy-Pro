@@ -64,6 +64,7 @@ class LuaPlugin : public Plugin {
 
     const char* id() const override { return idText; }
     const char* name() const override { return idText; }
+    const char* kind() const override { return "LUA"; }
     bool isActive() const override { return L != nullptr; }
 
     bool onStart() override;
