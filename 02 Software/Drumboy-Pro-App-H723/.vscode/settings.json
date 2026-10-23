@@ -1,3 +1,9 @@
 {
-    "editor.foldingMaximumRegions": 65000
+    "editor.foldingMaximumRegions": 65000,
+    "cmake.cmakePath": "${userHome}/Library/Application Support/stm32cube/bundles/cmake/4.4.0+st.1/CMake.app/Contents/bin/cmake",
+    "cmake.configureSettings": {
+        "CMAKE_MAKE_PROGRAM": "${userHome}/Library/Application Support/stm32cube/bundles/ninja/1.13.2+st.1/bin/ninja"
+    },
+    "cmake.useCMakePresets": "always",
+    "cmake.configureOnOpen": true
 }

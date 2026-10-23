@@ -11,7 +11,8 @@
                 "USE_HAL_DRIVER",
                 "USE_PWR_LDO_SUPPLY"
             ],
-            "compilerPath": "/Applications/STM32CubeIDE.app/Contents/Eclipse/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.14.3.rel1.macosaarch64_1.0.0.202602081740/tools/bin/arm-none-eabi-gcc",
+            "compilerPath": "${userHome}/Projects/DrumBoy/tools/arm-gnu-toolchain-14.2.rel1-darwin-arm64-arm-none-eabi/bin/arm-none-eabi-gcc",
+            "configurationProvider": "ms-vscode.cmake-tools",
             "compilerArgs": [
                 "-mcpu=cortex-m7",
                 "-mfpu=fpv5-d16",
