@@ -68,16 +68,15 @@ int main() {
 
     // Initialize Application
     controller.initialize();
-    PLUGIN_INIT();
+    if (controller.getMenu() != TEST_MENU) PLUGIN_INIT(controller);
 
     // Main Loop
     while (true) {
         PROFILE_LOOP_BEGIN();
         controller.update();
         PROFILE_LOOP_END();
-        if (controller.getMenu() != INIT_MENU) {
+        if ((controller.getMenu() != INIT_MENU) && (controller.getMenu() != TEST_MENU)) {
             PLUGIN_UPDATE(controller.lcd);
-            PROFILE_DRAW(controller.lcd);
             BRANDING_DRAW(controller.lcd, controller.getMenu() == FILE_MENU);
         }
     }

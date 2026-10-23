@@ -18,6 +18,7 @@ const uint16_t kHookMonitorTextSize                 = 128;
 
 class HookMonitor : public Plugin {
    public:
+    const char* id() const override { return "hook_monitor"; }
     const char* name() const override { return "Hook Monitor"; }
 
     void onEvent(const PluginEvent& e) override {
@@ -97,8 +98,8 @@ class HookMonitor : public Plugin {
 
 static HookMonitor hookMonitor;
 
-void registerBuiltinPlugins() {
-    pluginHost_register(&hookMonitor);
+Plugin* builtin_hookMonitor() {
+    return &hookMonitor;
 }
 
 #endif

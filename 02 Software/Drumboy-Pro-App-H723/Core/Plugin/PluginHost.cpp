@@ -2,7 +2,11 @@
 
 #ifdef DRUMBOY_PLUGINS
 
+#include <ctype.h>
+#include <strings.h>
+
 #include "Lcd.h"
+#include "ff.h"
 
 // clang-format off
 
@@ -12,6 +16,8 @@ const uint16_t kPluginQueueSize                     = 128;              // Power
 const uint8_t  kPluginMaxCount                      = 8;
 const uint8_t  kPluginMaxEventsPerUpdate            = 32;               // Bounds main-loop time per pass
 const uint32_t kPluginFrameInterval                 = 33;               // ms (~30 fps)
+const char     kPluginConfigPath[]                  = "Plugins/plugins.txt";
+const uint16_t kPluginConfigMaxSize                 = 512;
 
 // clang-format on
 
@@ -25,19 +31,80 @@ static volatile uint32_t droppedEvents = 0;
 /* Registry ---------------------------------------------------------*/
 
 static Plugin* plugins[kPluginMaxCount];
+static bool pluginEnabled[kPluginMaxCount];
 static uint8_t pluginCount = 0;
+static uint8_t enabledCount = 0;
 static uint32_t lastFrameTick = 0;
 
-void registerBuiltinPlugins();  // HookMonitor.cpp (moves to its own file once there is more than one plugin)
+void registerBuiltinPlugins();  // BuiltinPlugins.cpp
 
-void pluginHost_initialize() {
-    /// @brief Registers compiled-in plugins. Called once after controller.initialize().
+static bool isEnabledValue(const char* value) {
+    return (strcasecmp(value, "on") == 0) || (strcasecmp(value, "yes") == 0) || (strcasecmp(value, "true") == 0) || (strcmp(value, "1") == 0);
+}
+
+static char* trim(char* text) {
+    while (isspace((unsigned char)*text)) text++;
+    char* end = text + strlen(text);
+    while ((end > text) && isspace((unsigned char)end[-1])) *--end = '\0';
+    return text;
+}
+
+static void loadConfig(FIL& file) {
+    /// @brief Reads "id = on|off" lines from Plugins/plugins.txt; a missing file leaves every plugin disabled.
+
+    // 1. READ FILE (static, 32-byte aligned buffer in RAM_D1 where SDMMC DMA can reach it)
+    static char text[kPluginConfigMaxSize + 1] __attribute__((aligned(32)));
+    UINT bytesRead = 0;
+
+    if (f_open(&file, kPluginConfigPath, FA_READ) != FR_OK) return;
+    FRESULT result = f_read(&file, text, kPluginConfigMaxSize, &bytesRead);
+    f_close(&file);
+    if (result != FR_OK) return;
+    text[bytesRead] = '\0';
+
+    // 2. PARSE LINES
+    char* line = text;
+    while (line != nullptr) {
+        char* next = strpbrk(line, "\r\n");
+        if (next != nullptr) *next++ = '\0';
+
+        char* hash = strchr(line, '#');
+        if (hash != nullptr) *hash = '\0';
+
+        char* equals = strchr(line, '=');
+        if (equals != nullptr) {
+            *equals = '\0';
+            const char* key = trim(line);
+            const char* value = trim(equals + 1);
+
+            for (uint8_t i = 0; i < pluginCount; i++) {
+                if (strcasecmp(key, plugins[i]->id()) == 0) pluginEnabled[i] = isEnabledValue(value);
+            }
+        }
+        line = next;
+    }
+
+    // 3. COUNT ENABLED
+    enabledCount = 0;
+    for (uint8_t i = 0; i < pluginCount; i++) {
+        if (pluginEnabled[i]) enabledCount++;
+    }
+}
+
+void pluginHost_initialize(FIL& file) {
+    /// @brief Registers compiled-in plugins and applies Plugins/plugins.txt. Called once after controller.initialize().
+    /// Borrows the controller's idle FIL (4 KB) instead of keeping a second one.
 
     registerBuiltinPlugins();
+    loadConfig(file);
 }
 
 void pluginHost_register(Plugin* plugin) {
-    if ((plugin != nullptr) && (pluginCount < kPluginMaxCount)) plugins[pluginCount++] = plugin;
+    if ((plugin != nullptr) && (pluginCount < kPluginMaxCount)) {
+        plugins[pluginCount] = plugin;
+        pluginEnabled[pluginCount] = false;
+        pluginCount++;
+    }
 }
 
 uint32_t pluginHost_getDroppedEvents() {
@@ -91,10 +158,13 @@ void pluginHost_update(Lcd& lcd) {
         PluginEvent event = queue[queueTail];
         queueTail = (queueTail + 1) & (kPluginQueueSize - 1);
 
-        for (uint8_t i = 0; i < pluginCount; i++) plugins[i]->onEvent(event);
+        for (uint8_t i = 0; i < pluginCount; i++) {
+            if (pluginEnabled[i]) plugins[i]->onEvent(event);
+        }
     }
 
     // 2. FRAME
+    if (enabledCount == 0) return;
     uint32_t tick = HAL_GetTick();
     if ((tick - lastFrameTick) < kPluginFrameInterval) return;
     lastFrameTick = tick;
@@ -107,7 +177,9 @@ void pluginHost_update(Lcd& lcd) {
     RGB16Color fore = lcd.getForeColor();
     RGB16Color back = lcd.getBackColor();
 
-    for (uint8_t i = 0; i < pluginCount; i++) plugins[i]->onFrame(lcd);
+    for (uint8_t i = 0; i < pluginCount; i++) {
+        if (pluginEnabled[i]) plugins[i]->onFrame(lcd);
+    }
 
     lcd.setFont(font);
     lcd.setSpacing(spacing);

@@ -1,19 +1,8 @@
 #include "Profiler.h"
 
-#ifdef DRUMBOY_CPU_METER
+#ifdef DRUMBOY_PLUGINS
 
-#include "Lcd.h"
-
-// clang-format off
-
-/* Settings ---------------------------------------------------------*/
-
-const uint32_t kProfilerDrawInterval                = 500;              // ms between screen updates
-const uint16_t kProfilerTextX                       = 20;               // Top-left strip, empty in all stock layouts
-const uint16_t kProfilerTextY                       = 6;
-const uint16_t kProfilerTextSize                    = 96;
-
-// clang-format on
+#include "Global.h"
 
 /* Audio Statistics (written in I2S interrupt) ----------------------*/
 
@@ -31,7 +20,7 @@ static uint32_t loopStart = 0;
 static uint64_t loopBusySum = 0;
 static uint32_t loopMax = 0;
 static uint32_t loopCount = 0;
-static uint32_t lastDrawTick = 0;
+static uint32_t lastSnapshotTick = 0;
 
 void profiler_audioBegin() {
     /// @brief Marks the start of an audio block; the distance to the previous start is the block period.
@@ -73,15 +62,10 @@ void profiler_loopEnd() {
     loopCount++;
 }
 
-void profiler_draw(Lcd& lcd) {
-    /// @brief Prints the meter every kProfilerDrawInterval ms, preserving the LCD drawing state.
+void profiler_snapshot(ProfilerStats& stats) {
+    /// @brief Derives the statistics accumulated since the previous snapshot, then resets them.
 
-    // 1. RATE LIMIT
-    uint32_t tick = HAL_GetTick();
-    if ((tick - lastDrawTick) < kProfilerDrawInterval) return;
-    lastDrawTick = tick;
-
-    // 2. SNAPSHOT + RESET AUDIO STATISTICS
+    // 1. SNAPSHOT + RESET AUDIO STATISTICS
     __disable_irq();
     uint64_t busySum = audioBusySum;
     uint64_t periodSum = audioPeriodSum;
@@ -93,43 +77,23 @@ void profiler_draw(Lcd& lcd) {
     audioBlockCount = 0;
     __enable_irq();
 
-    // 3. DERIVE VALUES (integer math: nano printf has no float support)
-    uint32_t cyclesPerUs = SystemCoreClock / 1000000;
-    uint32_t avgPermille = (periodSum > 0) ? (uint32_t)((busySum * 1000) / periodSum) : 0;
-    uint32_t blockUs = (blockCount > 0) ? (uint32_t)(periodSum / blockCount / cyclesPerUs) : 0;
-    uint32_t loopAvgUs = (loopCount > 0) ? (uint32_t)(loopBusySum / loopCount / cyclesPerUs) : 0;
-    uint32_t loopMaxUs = loopMax / cyclesPerUs;
-    uint32_t loopHz = (loopCount * 1000) / kProfilerDrawInterval;
+    // 2. DERIVE VALUES
+    uint32_t tick = HAL_GetTick();
+    uint32_t elapsedMs = tick - lastSnapshotTick;
+    lastSnapshotTick = tick;
 
+    uint32_t cyclesPerUs = SystemCoreClock / 1000000;
+    stats.audioAvgPermille = (periodSum > 0) ? (uint32_t)((busySum * 1000) / periodSum) : 0;
+    stats.audioPeakPermille = peakPermille;
+    stats.blockUs = (blockCount > 0) ? (uint32_t)(periodSum / blockCount / cyclesPerUs) : 0;
+    stats.loopAvgUs = (loopCount > 0) ? (uint32_t)(loopBusySum / loopCount / cyclesPerUs) : 0;
+    stats.loopMaxUs = loopMax / cyclesPerUs;
+    stats.loopHz = (elapsedMs > 0) ? (loopCount * 1000) / elapsedMs : 0;
+
+    // 3. RESET LOOP STATISTICS
     loopBusySum = 0;
     loopMax = 0;
     loopCount = 0;
-
-    char text[kProfilerTextSize];
-    int len = snprintf(text, sizeof(text), "AUDIO AVG %3lu.%lu%% PEAK %3lu.%lu%% BLK %4luUS   LOOP AVG %6luUS MAX %6luUS %6luHZ  ",
-                       avgPermille / 10, avgPermille % 10, peakPermille / 10, peakPermille % 10, blockUs,
-                       loopAvgUs, loopMaxUs, loopHz);
-    if (len <= 0) return;
-    if (len >= (int)sizeof(text)) len = sizeof(text) - 1;
-
-    // 4. DRAW WITH SAVED LCD STATE
-    LcdFont font = lcd.getFont();
-    uint16_t spacing = lcd.getSpacing();
-    LcdAlign align = lcd.getAlignment();
-    RGB16Color fore = lcd.getForeColor();
-    RGB16Color back = lcd.getBackColor();
-
-    lcd.setFont(FONT_05x07);
-    lcd.setAlignment(LEFT);
-    lcd.setForeColor((peakPermille > 800) ? RED : GREEN);
-    lcd.setBackColor(BLACK);
-    lcd.drawText(text, len, kProfilerTextX, kProfilerTextY);
-
-    lcd.setFont(font);
-    lcd.setSpacing(spacing);
-    lcd.setAlignment(align);
-    lcd.setForeColor(fore);
-    lcd.setBackColor(back);
 }
 
 #endif

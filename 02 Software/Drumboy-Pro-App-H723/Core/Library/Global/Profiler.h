@@ -5,27 +5,33 @@
 
 // clang-format off
 
-/* CPU Meter --------------------------------------------------------*/
-// Development tool, enabled with -DDRUMBOY_CPU_METER (CMake preset "CpuMeter").
+/* CPU Load Measurement ---------------------------------------------*/
 // Measures audio callback load against the I2S block period and main loop
-// iteration time using the DWT cycle counter, and prints the result in the
-// unused strip at the top of the screen. Compiles to nothing when disabled.
+// iteration time with the DWT cycle counter (a few dozen cycles per audio
+// block). Compiled with the plugin host (-DDRUMBOY_PLUGINS); the CPU Meter
+// plugin displays the result. Compiles to nothing when disabled.
 
-#ifdef DRUMBOY_CPU_METER
+struct ProfilerStats {
+    uint32_t audioAvgPermille;                                  // Average audio load, per mille of the block period
+    uint32_t audioPeakPermille;                                 // Worst single block
+    uint32_t blockUs;                                           // Measured I2S block period
+    uint32_t loopAvgUs;                                         // Main loop iteration time (includes interrupts)
+    uint32_t loopMaxUs;
+    uint32_t loopHz;                                            // Main loop iterations per second
+};
 
-class Lcd;
+#ifdef DRUMBOY_PLUGINS
 
 void profiler_audioBegin();
 void profiler_audioEnd();
 void profiler_loopBegin();
 void profiler_loopEnd();
-void profiler_draw(Lcd& lcd);
+void profiler_snapshot(ProfilerStats& stats);                   // Returns stats since the last snapshot and resets them
 
 #define PROFILE_AUDIO_BEGIN()                       profiler_audioBegin()
 #define PROFILE_AUDIO_END()                         profiler_audioEnd()
 #define PROFILE_LOOP_BEGIN()                        profiler_loopBegin()
 #define PROFILE_LOOP_END()                          profiler_loopEnd()
-#define PROFILE_DRAW(lcd_)                          profiler_draw(lcd_)
 
 #else
 
@@ -33,7 +39,6 @@ void profiler_draw(Lcd& lcd);
 #define PROFILE_AUDIO_END()                         ((void)0)
 #define PROFILE_LOOP_BEGIN()                        ((void)0)
 #define PROFILE_LOOP_END()                          ((void)0)
-#define PROFILE_DRAW(lcd_)                          ((void)0)
 
 #endif
 

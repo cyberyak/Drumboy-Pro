@@ -10,7 +10,7 @@
         },
         {
             "name": "Debug",
-            "displayName": "Debug (-Ofast, release build with CYBERYAK label)",
+            "displayName": "Debug (-Ofast, release build: plugin host + CYBERYAK label)",
             "inherits": "base",
             "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
         },
@@ -18,32 +18,18 @@
             "name": "Stock",
             "displayName": "Stock (Debug without any additions, identical to official firmware)",
             "inherits": "base",
-            "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "DRUMBOY_BRANDING": "OFF" }
+            "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "DRUMBOY_PLUGINS": "OFF", "DRUMBOY_BRANDING": "OFF" }
         },
         {
             "name": "Release",
             "displayName": "Release (-Os, smaller, slower DSP)",
             "inherits": "base",
             "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
-        },
-        {
-            "name": "CpuMeter",
-            "displayName": "Debug + on-screen CPU meter",
-            "inherits": "base",
-            "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "DRUMBOY_CPU_METER": "ON" }
-        },
-        {
-            "name": "PluginDev",
-            "displayName": "Debug + plugin host + CPU meter",
-            "inherits": "base",
-            "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "DRUMBOY_CPU_METER": "ON", "DRUMBOY_PLUGINS": "ON" }
         }
     ],
     "buildPresets": [
         { "name": "Debug", "configurePreset": "Debug" },
         { "name": "Stock", "configurePreset": "Stock" },
-        { "name": "Release", "configurePreset": "Release" },
-        { "name": "CpuMeter", "configurePreset": "CpuMeter" },
-        { "name": "PluginDev", "configurePreset": "PluginDev" }
+        { "name": "Release", "configurePreset": "Release" }
     ]
 }

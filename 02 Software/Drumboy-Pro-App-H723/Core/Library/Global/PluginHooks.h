@@ -7,8 +7,8 @@
 
 /* Plugin Hooks -----------------------------------------------------*/
 // Entry points from the stock firmware into the plugin host (Core/Plugin).
-// Enabled with -DDRUMBOY_PLUGINS (CMake preset "PluginDev"); every hook
-// compiles to nothing when disabled, so the stock build is unchanged.
+// Enabled with -DDRUMBOY_PLUGINS (on in all presets except "Stock"); every
+// hook compiles to nothing when disabled, so the stock build is unchanged.
 //
 // Hooks only push small events into an interrupt-safe queue. Plugins are
 // run later from the main loop, never inside the audio or timer interrupts.
@@ -33,21 +33,24 @@ struct PluginEvent {
 
 #ifdef DRUMBOY_PLUGINS
 
+#include "ff.h"
+
 class Lcd;
 
-void pluginHost_initialize();
+void pluginHost_initialize(FIL& file);
 void pluginHost_update(Lcd& lcd);
 void pluginHost_push(PluginEventType type, uint8_t a, uint8_t b, uint8_t c);
 void pluginHost_pushKeypad(uint8_t keypad, const uint8_t* changeState, uint8_t count);
 
-#define PLUGIN_INIT()                               pluginHost_initialize()
+// Reads Plugins/plugins.txt, so it takes the same keypad lock the controller uses around SD access.
+#define PLUGIN_INIT(controller_)                    do { (controller_).keyboard_disable(); pluginHost_initialize((controller_).sd.file); (controller_).keyboard_enable(); } while (0)
 #define PLUGIN_UPDATE(lcd_)                         pluginHost_update(lcd_)
 #define PLUGIN_EVENT(type_, a_, b_, c_)             pluginHost_push((type_), (uint8_t)(a_), (uint8_t)(b_), (uint8_t)(c_))
 #define PLUGIN_KEYPAD(keypad_, states_, count_)     pluginHost_pushKeypad((keypad_), (const uint8_t*)(states_), (count_))
 
 #else
 
-#define PLUGIN_INIT()                               ((void)0)
+#define PLUGIN_INIT(controller_)                    ((void)0)
 #define PLUGIN_UPDATE(lcd_)                         ((void)0)
 #define PLUGIN_EVENT(type_, a_, b_, c_)             ((void)0)
 #define PLUGIN_KEYPAD(keypad_, states_, count_)     ((void)0)

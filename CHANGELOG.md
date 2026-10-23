@@ -12,12 +12,16 @@ Custom Drumboy Pro firmware by cyberyak (fork of [Randomwaves/Drumboy-Pro](https
 
 ## [1.01-cy.1]
 
-First custom release, based on Randomwaves 1.01. Stock behaviour is unchanged apart from the build label; the other extras are only in the development builds.
+First custom release, based on Randomwaves 1.01: a plugin-capable firmware with two built-in plugins. With no plugins enabled it behaves exactly like stock, apart from the build label.
 
 ### Added
+- **Plugin host**: hooks (step, note, key, encoder, MIDI in/out), interrupt-safe event queue, plugins run in the main loop at ~30 fps with the stock UI's drawing state protected.
+- **Plugins are switched on in `Plugins/plugins.txt`** on the SD card (`id = on|off`); a missing file means all plugins off.
+- Built-in plugin **`cpu_meter`**: audio load (average/peak per block) and main-loop timing in the top-left strip. Measured 29.9% average / 32.2% peak with 10 tracks and effects.
+- Built-in plugin **`hook_monitor`**: developer view of the latest events from every hook. Verified on device (MIDI not yet tested).
 - Build label `CYBERYAK 1.01-CY.1` in the File menu (top-right corner).
-- CMake/Ninja build and VS Code setup (no STM32CubeIDE needed). Presets: `Debug` (release build), `Stock` (identical to official firmware), `CpuMeter`, `PluginDev`.
+- CMake/Ninja build and VS Code setup (no STM32CubeIDE needed). Presets: `Debug` (release build), `Stock` (identical to official firmware), `Release` (-Os).
 - SD-card package script (byte-identical to the official package format).
 - GitHub Actions build: artifacts on every push/PR, GitHub Release on version tags.
-- `CpuMeter` preset: on-screen audio and main-loop load. Measured 29.9% average / 32.2% peak with 10 tracks and effects.
-- `PluginDev` preset: plugin hooks (step, note, key, encoder, MIDI in/out), interrupt-safe event queue, plugin host and the Hook Monitor test plugin. Verified on device (MIDI not yet tested).
+
+Cost versus stock: +3.0 KB flash, +1.7 KB RAM.
