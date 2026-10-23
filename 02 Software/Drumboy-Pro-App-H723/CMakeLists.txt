@@ -16,6 +16,18 @@ endif()
 
 project(Drumboy-Pro-App-H723 C CXX ASM)
 
+# Firmware version: single source of truth is the VERSION file ("MAJOR.MINOR", e.g. 1.50).
+# The bootloader shows it during an SD-card update and accepts major 0-9, minor 00-99.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION")
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" FW_VERSION LIMIT_COUNT 1)
+if(NOT FW_VERSION MATCHES "^([0-9])\\.([0-9][0-9])$")
+    message(FATAL_ERROR "VERSION must look like 1.50 (major 0-9, minor 00-99), got '${FW_VERSION}'")
+endif()
+set(FW_VERSION_MAJOR ${CMAKE_MATCH_1})
+math(EXPR FW_VERSION_MINOR "${CMAKE_MATCH_2}")
+set(FW_PACKAGE "Drumboy_Pro_Fw_0${FW_VERSION_MAJOR}_${CMAKE_MATCH_2}.bin")
+message(STATUS "Drumboy Pro firmware version ${FW_VERSION} -> ${FW_PACKAGE}")
+
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_EXTENSIONS ON)
 set(CMAKE_CXX_STANDARD 14)
@@ -60,6 +72,8 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
     $<$<CONFIG:Debug>:DEBUG>
     $<$<BOOL:${DRUMBOY_CPU_METER}>:DRUMBOY_CPU_METER>
     $<$<BOOL:${DRUMBOY_PLUGINS}>:DRUMBOY_PLUGINS>
+    DRUMBOY_VERSION_MAJOR=${FW_VERSION_MAJOR}
+    DRUMBOY_VERSION_MINOR=${FW_VERSION_MINOR}
 )
 
 target_compile_options(${PROJECT_NAME} PRIVATE
@@ -79,15 +93,6 @@ target_link_options(${PROJECT_NAME} PRIVATE
     -static
 )
 target_link_libraries(${PROJECT_NAME} PRIVATE -Wl,--start-group c m stdc++ supc++ -Wl,--end-group)
-
-# Version shown by the bootloader during an SD-card update (major < 10, minor < 100).
-set(FW_VERSION_MAJOR 1 CACHE STRING "Firmware package version major")
-set(FW_VERSION_MINOR 1 CACHE STRING "Firmware package version minor")
-math(EXPR _FW_MINOR_PADDED "${FW_VERSION_MINOR}" OUTPUT_FORMAT DECIMAL)
-if(FW_VERSION_MINOR LESS 10)
-    set(_FW_MINOR_PADDED "0${FW_VERSION_MINOR}")
-endif()
-set(FW_PACKAGE "Drumboy_Pro_Fw_0${FW_VERSION_MAJOR}_${_FW_MINOR_PADDED}.bin")
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
