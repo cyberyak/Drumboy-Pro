@@ -69,13 +69,15 @@ jobs:
             -DFW_VERSION_MINOR=${{ steps.version.outputs.minor }}
           cmake --build --preset Debug
 
-      - name: Build (CpuMeter preset, development tool)
+      - name: Build (CpuMeter and PluginDev presets, development builds)
         if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         working-directory: ${{ env.APP_DIR }}
         run: |
           export PATH="$HOME/arm-gnu-toolchain/bin:$PATH"
-          cmake --preset CpuMeter
-          cmake --build --preset CpuMeter
+          for preset in CpuMeter PluginDev; do
+            cmake --preset $preset
+            cmake --build --preset $preset
+          done
 
       - name: Upload firmware
         uses: actions/upload-artifact@v4

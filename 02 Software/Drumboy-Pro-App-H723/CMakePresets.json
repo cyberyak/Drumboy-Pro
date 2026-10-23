@@ -25,11 +25,18 @@
             "displayName": "Debug + on-screen CPU meter",
             "inherits": "base",
             "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "DRUMBOY_CPU_METER": "ON" }
+        },
+        {
+            "name": "PluginDev",
+            "displayName": "Debug + plugin host + CPU meter",
+            "inherits": "base",
+            "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "DRUMBOY_CPU_METER": "ON", "DRUMBOY_PLUGINS": "ON" }
         }
     ],
     "buildPresets": [
         { "name": "Debug", "configurePreset": "Debug" },
         { "name": "Release", "configurePreset": "Release" },
-        { "name": "CpuMeter", "configurePreset": "CpuMeter" }
+        { "name": "CpuMeter", "configurePreset": "CpuMeter" },
+        { "name": "PluginDev", "configurePreset": "PluginDev" }
     ]
 }

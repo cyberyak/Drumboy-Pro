@@ -25,6 +25,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(MCU_FLAGS -mcpu=cortex-m7 -mfpu=fpv5-d16 -mfloat-abi=hard -mthumb)
 
 option(DRUMBOY_CPU_METER "Show audio/main-loop CPU load at the top of the screen" OFF)
+option(DRUMBOY_PLUGINS "Enable the plugin host and hooks (Core/Plugin)" OFF)
 
 file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS
     Core/*.c Core/*.cpp Core/*.s
@@ -49,6 +50,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     Core/Library/Lcd
     Core/Library/Dac
     Core/Library/Controller
+    Core/Plugin
 )
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE
@@ -57,6 +59,7 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
     STM32H723xx
     $<$<CONFIG:Debug>:DEBUG>
     $<$<BOOL:${DRUMBOY_CPU_METER}>:DRUMBOY_CPU_METER>
+    $<$<BOOL:${DRUMBOY_PLUGINS}>:DRUMBOY_PLUGINS>
 )
 
 target_compile_options(${PROJECT_NAME} PRIVATE

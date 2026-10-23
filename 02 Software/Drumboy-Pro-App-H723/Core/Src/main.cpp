@@ -1,6 +1,7 @@
 #include "main.h"
 
 #include "Controller.h"
+#include "PluginHooks.h"
 #include "Profiler.h"
 #include "bdma.h"
 #include "dma.h"
@@ -66,13 +67,17 @@ int main() {
 
     // Initialize Application
     controller.initialize();
+    PLUGIN_INIT();
 
     // Main Loop
     while (true) {
         PROFILE_LOOP_BEGIN();
         controller.update();
         PROFILE_LOOP_END();
-        if (controller.getMenu() != INIT_MENU) PROFILE_DRAW(controller.lcd);
+        if (controller.getMenu() != INIT_MENU) {
+            PLUGIN_UPDATE(controller.lcd);
+            PROFILE_DRAW(controller.lcd);
+        }
     }
 }
 

@@ -1,4 +1,5 @@
 #include "Controller.h"
+#include "PluginHooks.h"
 
 Controller::Controller()
 
@@ -1038,6 +1039,7 @@ bool Controller::enqueueMidiTx(const uint8_t* data, uint8_t len) {
     }
 
     // 3. ENQUEUE
+    if (data[0] != 0xF8) PLUGIN_EVENT(PLUGIN_EVENT_MIDI_OUT, data[0], (len > 1) ? data[1] : 0, (len > 2) ? data[2] : 0);
     // Write message bytes and length into the next ring buffer slot.
     MidiTxMsg& slot = io.midi.txRing[io.midi.txRingHead];
     for (uint8_t i = 0; i < len; i++) slot.data[i] = data[i];
@@ -1096,6 +1098,7 @@ void Controller::receiveMidiCommand() {
     if (!io.midi.rxActive) return;
 
     uint8_t rxData = midiRxData;
+    if ((rxData != 0xF8) && (rxData != 0xFE)) PLUGIN_EVENT(PLUGIN_EVENT_MIDI_IN, rxData, 0, 0);
 
     // 2. REAL-TIME MESSAGE HANDLER (0xF8–0xFF)
     // Single-byte real-time messages may appear anywhere in the byte stream.
@@ -1552,6 +1555,10 @@ void Controller::keyboard_action() {
 
     // 1. INPUT GATE CHECK
     if (keyboardActive) {
+        if (keyboard.keyLayer.read) PLUGIN_KEYPAD(0, keyboard.keyLayer.changeState, kLayerLibrarySize);
+        if (keyboard.keyLeft.read) PLUGIN_KEYPAD(1, keyboard.keyLeft.changeState, 16);
+        if (keyboard.keyRight.read) PLUGIN_KEYPAD(2, keyboard.keyRight.changeState, 16);
+
         // 2. LAYER KEYPAD DISPATCH
         if (keyboard.keyLayer.read) {
             for (uint8_t layerNum = 0; layerNum < kLayerLibrarySize; layerNum++) {
@@ -3066,6 +3073,7 @@ void Controller::encoder_action() {
             // 2. ACTION DISPATCH
             // Process only events promoted by encoder_read().
             if (enc.read) {
+                PLUGIN_EVENT(PLUGIN_EVENT_ENCODER, encNum_, (enc.actionCurrent == ENC_INC) ? 1 : -1, 0);
                 switch (enc.mode) {
                         // --- LOCAL MODE ---
                         // Use menu-bound function mapping.
@@ -18541,6 +18549,8 @@ void Controller::layer_playBeat(uint8_t layerNum_, float fillVolMultiplier_) {
                 if (random > threshold) probability = false;
             }
             if (probability) {
+                PLUGIN_EVENT(PLUGIN_EVENT_NOTE, layerNum_, (fillVolMultiplier_ >= 1.0f) ? 127 : (uint8_t)(fillVolMultiplier_ * 127.0f), 0);
+
                 // initialize temp beat data
                 tBD.active = true;
                 tBD.ramAddress = RAM_SAMPLE_ADDRESS + (targetSector * kSampleByteSize);
@@ -23463,6 +23473,10 @@ void Controller::interruptPlay() {
 
             // 4. SONG NAVIGATION & LOOP MANAGEMENT
             // Advance timeline, evaluate stop/reset triggers, and handle loop wrap.
+            if (playInterval % (kMeasureInterval / 4) == 0) {
+                PLUGIN_EVENT(PLUGIN_EVENT_STEP, (playInterval / (kMeasureInterval / 4)) & 0xFF, (playInterval / (kMeasureInterval / 4)) >> 8, 0);
+            }
+
             playInterval += 1;
             if (playInterval < songInterval) {
                 // Handle pending Stop/Reset requests with visual feedback
