@@ -19,10 +19,17 @@
             "displayName": "Release (-Os, smaller, slower DSP)",
             "inherits": "base",
             "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+        },
+        {
+            "name": "CpuMeter",
+            "displayName": "Debug + on-screen CPU meter",
+            "inherits": "base",
+            "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "DRUMBOY_CPU_METER": "ON" }
         }
     ],
     "buildPresets": [
         { "name": "Debug", "configurePreset": "Debug" },
-        { "name": "Release", "configurePreset": "Release" }
+        { "name": "Release", "configurePreset": "Release" },
+        { "name": "CpuMeter", "configurePreset": "CpuMeter" }
     ]
 }

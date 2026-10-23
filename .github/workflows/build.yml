@@ -69,14 +69,22 @@ jobs:
             -DFW_VERSION_MINOR=${{ steps.version.outputs.minor }}
           cmake --build --preset Debug
 
+      - name: Build (CpuMeter preset, development tool)
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          export PATH="$HOME/arm-gnu-toolchain/bin:$PATH"
+          cmake --preset CpuMeter
+          cmake --build --preset CpuMeter
+
       - name: Upload firmware
         uses: actions/upload-artifact@v4
         with:
           name: drumboy-pro-firmware-${{ github.sha }}
           path: |
-            ${{ env.APP_DIR }}/build/Debug/Drumboy_Pro_Fw_*.bin
-            ${{ env.APP_DIR }}/build/Debug/Drumboy-Pro-App-H723.elf
-            ${{ env.APP_DIR }}/build/Debug/Drumboy-Pro-App-H723.map
+            ${{ env.APP_DIR }}/build/*/Drumboy_Pro_Fw_*.bin
+            ${{ env.APP_DIR }}/build/*/Drumboy-Pro-App-H723.elf
+            ${{ env.APP_DIR }}/build/*/Drumboy-Pro-App-H723.map
 
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/v')
