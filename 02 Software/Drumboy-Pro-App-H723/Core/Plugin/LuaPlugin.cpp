@@ -24,6 +24,7 @@ const size_t   kLuaPluginMemoryLimit                = 48 * 1024;        // Per s
 const uint32_t kLuaLoadBudgetMs                     = 300;              // Loading + on_load()
 const uint32_t kLuaEventBudgetMs                    = 2;                // Each on_<event>() call
 const uint32_t kLuaFrameBudgetMs                    = 10;               // Each on_frame() call
+const uint32_t kLuaShowBudgetMs                     = 25;               // Each on_show_frame() call (stock UI is paused)
 const int      kLuaHookInstructions                 = 1000;             // Budget check interval
 const uint16_t kLuaTextMaxLength                    = 120;
 
@@ -34,7 +35,9 @@ const uint16_t kLuaTextMaxLength                    = 120;
 static FIL* scriptFile = nullptr;                                       // Controller's FIL, lent at boot
 static uint32_t callStartCycles = 0;
 static uint32_t callBudgetCycles = 0;
-static Lcd* frameLcd = nullptr;                                         // Set only during on_frame()
+static Lcd* frameLcd = nullptr;                                         // Set only during on_frame() / on_show_frame()
+struct FrameArea { int32_t x, y, w, h; };
+static FrameArea frameArea = {0, 0, 960, 540};
 static RGB16Color frameColor = WHITE;
 
 static void budgetHook(lua_State* L, lua_Debug* ar) {
@@ -71,12 +74,20 @@ class LuaPlugin : public Plugin {
     void onEvent(const PluginEvent& e) override;
     void onFrame(Lcd& lcd) override;
 
+    bool canShow() const override { return (L != nullptr) && hasShow; }
+    void onShowStart() override;
+    void onShowFrame(Lcd& lcd) override;
+    void onShowEnd() override;
+
     size_t used = 0;
 
    private:
     lua_State* L = nullptr;
+    bool hasShow = false;                                               // Script defines on_show_frame()
     char idText[kLuaPluginIdSize] = "";
     char path[48] = "";
+
+    void runFrame(Lcd& lcd, const char* function, FrameArea area, uint32_t budgetMs);
 
     bool call(const char* function, int nargs, uint32_t budgetMs);
     void fail();
@@ -174,34 +185,56 @@ static int api_memory(lua_State* L) {
     return 1;
 }
 
-/* Lua API: screen (only inside on_frame) ---------------------------*/
+/* Lua API: screen (only inside on_frame / on_show_frame) -----------*/
+// Coordinates are relative to the frame area and clipped to it: the whole
+// screen in on_frame(), the show canvas (kShowX/Y, kShowWidth x kShowHeight)
+// in on_show_frame().
 
 static Lcd& frame(lua_State* L) {
-    if (frameLcd == nullptr) luaL_error(L, "screen.* can only be used in on_frame()");
+    if (frameLcd == nullptr) luaL_error(L, "screen.* can only be used in on_frame() or on_show_frame()");
     frameLcd->setForeColor(frameColor);
     frameLcd->setBackColor(BLACK);
     return *frameLcd;
 }
 
-static uint16_t argX(lua_State* L, int i, Lcd& lcd) {
-    lua_Integer v = luaL_checkinteger(L, i);
-    return (uint16_t)((v < 0) ? 0 : (v >= lcd.getWidth()) ? lcd.getWidth() - 1 : v);
+static int32_t clampInt(lua_Integer v, int32_t lo, int32_t hi) {
+    return (int32_t)((v < lo) ? lo : (v > hi) ? hi : v);
 }
 
-static uint16_t argY(lua_State* L, int i, Lcd& lcd) {
-    lua_Integer v = luaL_checkinteger(L, i);
-    return (uint16_t)((v < 0) ? 0 : (v >= lcd.getHeight()) ? lcd.getHeight() - 1 : v);
+static lua_Integer argNumber(lua_State* L, int i) {
+    // Accepts integers and floats (rounded), so scripts can pass computed coordinates directly
+    lua_Number v = luaL_checknumber(L, i);
+    if (v > 100000.0f) v = 100000.0f;
+    if (v < -100000.0f) v = -100000.0f;
+    return (lua_Integer)floorf(v + 0.5f);
 }
 
-static uint16_t argSize(lua_State* L, int i, uint16_t max) {
-    lua_Integer v = luaL_checkinteger(L, i);
-    return (uint16_t)((v < 0) ? 0 : (v > max) ? max : v);
+static uint16_t argX(lua_State* L, int i) {
+    return (uint16_t)(frameArea.x + clampInt(argNumber(L, i), 0, frameArea.w - 1));
+}
+
+static uint16_t argY(lua_State* L, int i) {
+    return (uint16_t)(frameArea.y + clampInt(argNumber(L, i), 0, frameArea.h - 1));
+}
+
+static uint16_t argSize(lua_State* L, int i, int32_t max) {
+    return (uint16_t)clampInt(argNumber(L, i), 0, (max > 0) ? max : 0);
+}
+
+static int api_width(lua_State* L) {
+    lua_pushinteger(L, frameArea.w);
+    return 1;
+}
+
+static int api_height(lua_State* L) {
+    lua_pushinteger(L, frameArea.h);
+    return 1;
 }
 
 static int api_color(lua_State* L) {
-    int r = (int)luaL_checkinteger(L, 1) & 0xFF;
-    int g = (int)luaL_checkinteger(L, 2) & 0xFF;
-    int b = (int)luaL_checkinteger(L, 3) & 0xFF;
+    int r = clampInt(argNumber(L, 1), 0, 255);
+    int g = clampInt(argNumber(L, 2), 0, 255);
+    int b = clampInt(argNumber(L, 3), 0, 255);
     frameColor = (RGB16Color)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
     return 0;
 }
@@ -216,8 +249,8 @@ static int api_font(lua_State* L) {
 
 static int api_text(lua_State* L) {
     Lcd& lcd = frame(L);
-    uint16_t x = argX(L, 1, lcd);
-    uint16_t y = argY(L, 2, lcd);
+    uint16_t x = argX(L, 1);
+    uint16_t y = argY(L, 2);
     size_t len;
     const char* s = luaL_checklstring(L, 3, &len);
     const char* align = luaL_optstring(L, 4, "left");
@@ -229,10 +262,10 @@ static int api_text(lua_State* L) {
 
 static int api_rect(lua_State* L) {
     Lcd& lcd = frame(L);
-    uint16_t x = argX(L, 1, lcd);
-    uint16_t y = argY(L, 2, lcd);
-    uint16_t w = argSize(L, 3, lcd.getWidth() - x);
-    uint16_t h = argSize(L, 4, lcd.getHeight() - y);
+    uint16_t x = argX(L, 1);
+    uint16_t y = argY(L, 2);
+    uint16_t w = argSize(L, 3, frameArea.x + frameArea.w - x);
+    uint16_t h = argSize(L, 4, frameArea.y + frameArea.h - y);
     if ((w == 0) || (h == 0)) return 0;
     lua_toboolean(L, 5) ? lcd.fillRect(x, y, w, h) : lcd.drawRect(x, y, w, h);
     return 0;
@@ -240,41 +273,62 @@ static int api_rect(lua_State* L) {
 
 static int api_clear(lua_State* L) {
     Lcd& lcd = frame(L);
-    uint16_t x = argX(L, 1, lcd);
-    uint16_t y = argY(L, 2, lcd);
-    uint16_t w = argSize(L, 3, lcd.getWidth() - x);
-    uint16_t h = argSize(L, 4, lcd.getHeight() - y);
+    uint16_t x = (lua_gettop(L) >= 4) ? argX(L, 1) : frameArea.x;           // screen.clear() = whole frame area
+    uint16_t y = (lua_gettop(L) >= 4) ? argY(L, 2) : frameArea.y;
+    uint16_t w = (lua_gettop(L) >= 4) ? argSize(L, 3, frameArea.x + frameArea.w - x) : frameArea.w;
+    uint16_t h = (lua_gettop(L) >= 4) ? argSize(L, 4, frameArea.y + frameArea.h - y) : frameArea.h;
     if ((w > 0) && (h > 0)) lcd.clearRect(x, y, w, h);
     return 0;
 }
 
 static int api_line(lua_State* L) {
     Lcd& lcd = frame(L);
-    lcd.drawLine(argX(L, 1, lcd), argY(L, 2, lcd), argX(L, 3, lcd), argY(L, 4, lcd));
+    lcd.drawLine(argX(L, 1), argY(L, 2), argX(L, 3), argY(L, 4));
     return 0;
 }
 
 static int api_pixel(lua_State* L) {
     Lcd& lcd = frame(L);
-    lcd.drawPixel(argX(L, 1, lcd), argY(L, 2, lcd));
+    lcd.drawPixel(argX(L, 1), argY(L, 2));
     return 0;
 }
 
 static int api_circle(lua_State* L) {
     Lcd& lcd = frame(L);
-    uint16_t x = argX(L, 1, lcd);
-    uint16_t y = argY(L, 2, lcd);
-    uint16_t r = argSize(L, 3, 200);
-    if ((x < r) || (y < r) || (x + r >= lcd.getWidth()) || (y + r >= lcd.getHeight())) return 0;  // Fully on screen only
-    lua_toboolean(L, 4) ? lcd.fillCircle(x, y, r) : lcd.drawCircle(x, y, r);
+    lua_Integer cx = argNumber(L, 1);
+    lua_Integer cy = argNumber(L, 2);
+    lua_Integer r = argNumber(L, 3);
+    if ((r <= 0) || (cx - r < 0) || (cy - r < 0) || (cx + r >= frameArea.w) || (cy + r >= frameArea.h)) return 0;  // Fully inside only
+    uint16_t x = (uint16_t)(frameArea.x + cx), y = (uint16_t)(frameArea.y + cy);
+    lua_toboolean(L, 4) ? lcd.fillCircle(x, y, (uint16_t)r) : lcd.drawCircle(x, y, (uint16_t)r);
     return 0;
 }
 
 static const luaL_Reg screenApi[] = {
     {"color", api_color}, {"font", api_font}, {"text", api_text}, {"rect", api_rect}, {"clear", api_clear},
-    {"line", api_line}, {"pixel", api_pixel}, {"circle", api_circle}, {nullptr, nullptr}};
+    {"line", api_line}, {"pixel", api_pixel}, {"circle", api_circle}, {"width", api_width}, {"height", api_height},
+    {nullptr, nullptr}};
 
 static const luaL_Reg sysApi[] = {{"millis", api_millis}, {"memory", api_memory}, {nullptr, nullptr}};
+
+/* Lua API: audio (output peaks since the previous frame, 0..1) -----*/
+
+static int api_level(lua_State* L) {
+    lua_pushnumber(L, pluginHost_getAudio().level);
+    return 1;
+}
+
+static int api_bass(lua_State* L) {
+    lua_pushnumber(L, pluginHost_getAudio().bass);
+    return 1;
+}
+
+static int api_treble(lua_State* L) {
+    lua_pushnumber(L, pluginHost_getAudio().treble);
+    return 1;
+}
+
+static const luaL_Reg audioApi[] = {{"level", api_level}, {"bass", api_bass}, {"treble", api_treble}, {nullptr, nullptr}};
 
 /* State Setup (runs inside lua_pcall so memory errors are caught) --*/
 
@@ -306,6 +360,8 @@ static int setupState(lua_State* L) {
     lua_setglobal(L, "screen");
     luaL_newlib(L, sysApi);
     lua_setglobal(L, "sys");
+    luaL_newlib(L, audioApi);
+    lua_setglobal(L, "audio");
     return 0;
 }
 
@@ -382,6 +438,8 @@ bool LuaPlugin::onStart() {
         fail();
         return false;
     }
+    hasShow = (lua_getglobal(L, "on_show_frame") == LUA_TFUNCTION);
+    lua_pop(L, 1);
     return call("on_load", 0, kLuaLoadBudgetMs);
 }
 
@@ -430,14 +488,32 @@ void LuaPlugin::onEvent(const PluginEvent& e) {
     }
 }
 
-void LuaPlugin::onFrame(Lcd& lcd) {
-    if (L == nullptr) return;
+void LuaPlugin::runFrame(Lcd& lcd, const char* function, FrameArea area, uint32_t budgetMs) {
+    /// @brief Calls a drawing callback with screen.* enabled for the given area (coordinates relative to it).
 
+    if (L == nullptr) return;
     frameLcd = &lcd;
+    frameArea = area;
     frameColor = WHITE;
     lcd.setFont(FONT_05x07);
-    call("on_frame", 0, kLuaFrameBudgetMs);
+    call(function, 0, budgetMs);
     frameLcd = nullptr;
+}
+
+void LuaPlugin::onFrame(Lcd& lcd) {
+    runFrame(lcd, "on_frame", {0, 0, lcd.getWidth(), lcd.getHeight()}, kLuaFrameBudgetMs);
+}
+
+void LuaPlugin::onShowStart() {
+    if (L != nullptr) call("on_show_start", 0, kLuaEventBudgetMs * 5);
+}
+
+void LuaPlugin::onShowFrame(Lcd& lcd) {
+    runFrame(lcd, "on_show_frame", {kShowX, kShowY, kShowWidth, kShowHeight}, kLuaShowBudgetMs);
+}
+
+void LuaPlugin::onShowEnd() {
+    if (L != nullptr) call("on_show_end", 0, kLuaEventBudgetMs * 5);
 }
 
 /* Discovery --------------------------------------------------------*/

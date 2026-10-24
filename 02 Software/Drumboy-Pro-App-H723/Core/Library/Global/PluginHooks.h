@@ -40,6 +40,7 @@ void pluginHost_update(Controller& controller);
 void pluginHost_push(PluginEventType type, uint8_t a, uint8_t b, uint8_t c);
 void pluginHost_pushKeypad(uint8_t keypad, const uint8_t* changeState, uint8_t count);
 bool pluginHost_isCapturing();
+void pluginHost_audioTap(const uint32_t* interleaved, uint16_t frames);
 
 #define PLUGIN_INIT(controller_)                    pluginHost_initialize(controller_)
 #define PLUGIN_UPDATE(controller_)                  pluginHost_update(controller_)
@@ -47,6 +48,8 @@ bool pluginHost_isCapturing();
 #define PLUGIN_KEYPAD(keypad_, states_, count_)     pluginHost_pushKeypad((keypad_), (const uint8_t*)(states_), (count_))
 // True while the Plugin & Firmware Manager owns keys, knobs and the song lanes; stock input and lcd_update() pause.
 #define PLUGIN_INPUT_CAPTURED()                     pluginHost_isCapturing()
+// Output level/bass/treble peaks for visual plugins; called in the I2S interrupt after each block (~200 flops).
+#define PLUGIN_AUDIO_TAP(buffer_, frames_)          pluginHost_audioTap((buffer_), (frames_))
 
 #else
 
@@ -55,6 +58,7 @@ bool pluginHost_isCapturing();
 #define PLUGIN_EVENT(type_, a_, b_, c_)             ((void)0)
 #define PLUGIN_KEYPAD(keypad_, states_, count_)     ((void)0)
 #define PLUGIN_INPUT_CAPTURED()                     (false)
+#define PLUGIN_AUDIO_TAP(buffer_, frames_)          ((void)0)
 
 #endif
 
