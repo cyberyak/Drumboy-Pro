@@ -19,6 +19,7 @@ const uint32_t kPluginFrameInterval                 = 33;               // ms (~
 const char     kPluginConfigPath[]                  = "Plugins/plugins.txt";
 const uint16_t kPluginConfigMaxSize                 = 512;
 const uint32_t kPluginMessageTime                   = 6000;             // ms a message stays on screen
+const uint32_t kPluginErrorTime                     = 15000;            // ms an error stays on screen
 const uint16_t kPluginMessageX                      = 20;
 const uint16_t kPluginMessageY                      = 16;               // Second line of the empty top strip
 const uint16_t kPluginMessageWidth                  = 920;
@@ -41,6 +42,52 @@ static bool pluginRunning[kPluginMaxCount];                             // Start
 static uint8_t pluginCount = 0;
 static uint8_t runningCount = 0;
 static uint32_t lastFrameTick = 0;
+
+/* Audio Tap --------------------------------------------------------*/
+// Written in the I2S interrupt (max-hold peaks), snapshotted and reset once per plugin frame.
+
+const float kAudioSampleScale = 1.0f / 2147483648.0f;                  // int32 full scale -> 1.0
+const float kAudioBassCoef = 0.0213f;                                   // One-pole low-pass ~150 Hz at 44.1 kHz
+const float kAudioMidCoef = 0.25f;                                      // One-pole low-pass ~2 kHz; treble = input - this
+
+static volatile float tapLevel = 0.0f;
+static volatile float tapBass = 0.0f;
+static volatile float tapTreble = 0.0f;
+static float bassState = 0.0f;                                          // Interrupt-only filter states
+static float midState = 0.0f;
+static PluginAudio frameAudio = {0.0f, 0.0f, 0.0f};
+
+void pluginHost_audioTap(const uint32_t* interleaved, uint16_t frames) {
+    /// @brief Mono mix of the output block -> peak level, low band and high band (one-pole filters).
+
+    float level = tapLevel, bass = tapBass, treble = tapTreble;
+    for (uint16_t i = 0; i < frames; i++) {
+        float mono = ((float)(int32_t)interleaved[i * 2] + (float)(int32_t)interleaved[i * 2 + 1]) * (0.5f * kAudioSampleScale);
+        bassState += kAudioBassCoef * (mono - bassState);
+        midState += kAudioMidCoef * (mono - midState);
+
+        float a = fabsf(mono), b = fabsf(bassState), t = fabsf(mono - midState);
+        if (a > level) level = a;
+        if (b > bass) bass = b;
+        if (t > treble) treble = t;
+    }
+    tapLevel = level;
+    tapBass = bass;
+    tapTreble = treble;
+}
+
+static void snapshotAudio() {
+    __disable_irq();
+    frameAudio.level = tapLevel;
+    frameAudio.bass = tapBass;
+    frameAudio.treble = tapTreble;
+    tapLevel = tapBass = tapTreble = 0.0f;
+    __enable_irq();
+}
+
+const PluginAudio& pluginHost_getAudio() {
+    return frameAudio;
+}
 
 /* Message Line -----------------------------------------------------*/
 
@@ -71,7 +118,7 @@ static void drawMessage(Lcd& lcd) {
     /// @brief Draws a pending message, and clears it after kPluginMessageTime. Caller guards LCD state.
 
     uint32_t tick = HAL_GetTick();
-    if (messagePending || (messageShown && ((tick - messageTick) >= kPluginMessageTime))) {
+    if (messagePending || (messageShown && ((tick - messageTick) >= (messageError ? kPluginErrorTime : kPluginMessageTime)))) {
         lcd.setBackColor(BLACK);
         lcd.clearRect(kPluginMessageX, kPluginMessageY - 1, kPluginMessageWidth, 9);
         messageShown = false;
@@ -279,6 +326,7 @@ void pluginHost_update(Controller& controller) {
     uint32_t tick = HAL_GetTick();
     if ((tick - lastFrameTick) < kPluginFrameInterval) return;
     lastFrameTick = tick;
+    snapshotAudio();
 
     // 3. LCD STATE GUARD
     // Plugins may change font/colours freely; the stock UI's drawing state is restored afterwards.

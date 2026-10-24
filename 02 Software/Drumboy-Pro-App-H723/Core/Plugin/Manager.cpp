@@ -242,7 +242,7 @@ static void drawPage(Controller& controller) {
     char text[112];
 
     // 1. TITLE (lane 0)
-    snprintf(text, sizeof(text), "%s  %s     UP/DOWN MOVE  CENTER SELECT  LEFT/RIGHT PAGE  FILE CLOSE",
+    snprintf(text, sizeof(text), "%s  %s   UP/DN MOVE  GLOBAL ON/OFF  SELECT SHOW  L/R PAGE  FILE CLOSE",
              (page == PAGE_PLUGINS) ? "[PLUGINS]" : " PLUGINS ", (page == PAGE_FIRMWARE) ? "[FIRMWARE]" : " FIRMWARE ");
     drawLane(lcd, 0, text, CYAN, FONT_05x07);
 
@@ -262,12 +262,13 @@ static void drawPage(Controller& controller) {
                 Plugin* plugin = pluginHost_getPlugin(i);
                 bool on = pluginHost_isConfigured(i);
                 bool running = pluginHost_isRunning(i);
-                const char* state = running ? (on ? "RUNNING" : "RUNNING - OFF AFTER RESTART") : (on ? "ON AFTER RESTART" : "");
+                const char* state = running ? (on ? (plugin->canShow() ? "RUNNING  SELECT = SHOW" : "RUNNING") : "RUNNING - OFF AFTER RESTART")
+                                            : (on ? "ON AFTER RESTART" : "");
                 snprintf(text, sizeof(text), "%c %-3s  %-20s %-9s %s", mark, on ? "ON" : "OFF", plugin->id(), plugin->kind(), state);
                 color = on ? GREEN : GRAY;
             } else {
                 const FirmwareEntry& fw = firmware[i];
-                const char* action = (confirmIndex == (int8_t)i) ? "CENTER AGAIN: INSTALL" : "";
+                const char* action = (confirmIndex == (int8_t)i) ? "GLOBAL AGAIN: INSTALL" : "";
                 snprintf(text, sizeof(text), "%c %-30s V%u.%02u %4luKB %s", mark, fw.name, fw.major, fw.minor, (unsigned long)(fw.size / 1024), action);
                 color = (confirmIndex == (int8_t)i) ? YELLOW : WHITE;
             }
@@ -293,6 +294,42 @@ static void restoreLanes(Controller& controller) {
     for (uint8_t lane = 0; lane < kLayerLibrarySize; lane++) controller.lcd_drawSong(lane, bank);
 }
 
+static void restoreRows(Controller& controller) {
+    /// @brief Gives the whole layer area back after show mode: row background image (as lcd_drawPage)
+    /// plus lcd_drawLayerTab (border, number, instrument, M/F/S boxes, song lane) for every row.
+
+    for (uint8_t row = 0; row < kLayerLibrarySize; row++) {
+        bool even = (row % 2) == 0;
+        const RGB16Color* indexPtr = (const RGB16Color*)(even ? RAM_IMAGE_LAYER_A_PALETTE_ADDRESS : RAM_IMAGE_LAYER_B_PALETTE_ADDRESS);
+        const uint8_t* dataPtr = (const uint8_t*)(even ? RAM_IMAGE_LAYER_A_DATA_ADDRESS : RAM_IMAGE_LAYER_B_DATA_ADDRESS);
+        controller.lcd.drawRGB16Image(indexPtr, dataPtr, 64, kImageLayerX, kImageLayerY[row], kImageLayerWidth, kImageLayerHeight);
+        controller.lcd_drawLayerTab(row);
+    }
+}
+
+/* Show Mode --------------------------------------------------------*/
+
+static Plugin* showPlugin = nullptr;
+static bool showClearPending = false;
+static bool rowsRestorePending = false;
+
+static void closeManagerQuietly(Controller& controller);
+
+static void startShow(Controller& controller, Plugin* plugin) {
+    closeManagerQuietly(controller);
+    showPlugin = plugin;
+    showClearPending = true;
+    plugin->onShowStart();
+}
+
+static void endShow() {
+    if (showPlugin != nullptr) {
+        if (showPlugin->isActive()) showPlugin->onShowEnd();
+        showPlugin = nullptr;
+        rowsRestorePending = true;
+    }
+}
+
 /* Open / Close -----------------------------------------------------*/
 
 static void openManager(Controller& controller) {
@@ -305,7 +342,7 @@ static void openManager(Controller& controller) {
     if (cursor[PAGE_FIRMWARE] >= firmwareCount) cursor[PAGE_FIRMWARE] = 0;
 }
 
-static void closeManager(Controller& controller) {
+static void saveIfChanged(Controller& controller) {
     if (configChanged) {
         controller.keyboard_disable();
         bool saved = pluginHost_saveConfig(controller.sd.file);
@@ -313,18 +350,29 @@ static void closeManager(Controller& controller) {
         pluginHost_message(saved ? "PLUGINS SAVED - RESTART THE DRUMBOY TO APPLY" : "COULD NOT SAVE PLUGINS/PLUGINS.TXT", !saved);
         if (saved) configChanged = false;
     }
+}
+
+static void closeManager(Controller& controller) {
+    saveIfChanged(controller);
     open = false;
     restorePending = true;
+}
+
+static void closeManagerQuietly(Controller& controller) {
+    // Leaving for show mode: the rows restore after the show covers the lanes too.
+    saveIfChanged(controller);
+    open = false;
+    restorePending = false;
 }
 
 /* Public -----------------------------------------------------------*/
 
 bool manager_isOpen() {
-    return open;
+    return open || (showPlugin != nullptr);  // Both own keys, knobs and the layer area
 }
 
 bool manager_needsFrame() {
-    return open || restorePending;
+    return open || (showPlugin != nullptr) || restorePending || rowsRestorePending;
 }
 
 void manager_endUpdate(Controller& controller) {
@@ -333,6 +381,17 @@ void manager_endUpdate(Controller& controller) {
 
 bool manager_handleEvent(const PluginEvent& e, Controller& controller) {
     /// @brief Opens on FILE (pressed while the File menu was already open); while open, uses all keys and knobs.
+
+    // 0. SHOW MODE: FILE ends it, other keys and knobs go to the show plugin only
+    if (showPlugin != nullptr) {
+        if ((e.type != PLUGIN_EVENT_KEY) && (e.type != PLUGIN_EVENT_ENCODER)) return false;
+        if ((e.type == PLUGIN_EVENT_KEY) && (e.a == kKeypadRight) && (e.b == KEY_FILE)) {
+            if (e.c) endShow();
+            return true;
+        }
+        if (showPlugin->isActive()) showPlugin->onEvent(e);
+        return true;
+    }
 
     // 1. CLOSED: WATCH FOR THE OPEN GESTURE
     if (!open) {
@@ -388,6 +447,21 @@ bool manager_handleEvent(const PluginEvent& e, Controller& controller) {
                 status[0] = '\0';
                 break;
 
+            case KEY_ADD:
+                if ((page == PAGE_PLUGINS) && (count > 0)) {
+                    uint8_t i = cursor[page];
+                    Plugin* plugin = pluginHost_getPlugin(i);
+                    if (!plugin->canShow()) {
+                        setStatus("THIS PLUGIN HAS NO SHOW MODE", true);
+                    } else if (!pluginHost_isRunning(i)) {
+                        setStatus("SWITCH THE PLUGIN ON AND RESTART FIRST", true);
+                    } else {
+                        startShow(controller, plugin);
+                        return true;
+                    }
+                }
+                break;
+
             case KEY_CENTER:
                 if (count == 0) break;
                 if (page == PAGE_PLUGINS) {
@@ -411,9 +485,25 @@ bool manager_handleEvent(const PluginEvent& e, Controller& controller) {
 }
 
 void manager_frame(Controller& controller) {
+    // 1. SHOW MODE (ends by itself if the plugin failed, e.g. a Lua error)
+    if ((showPlugin != nullptr) && !showPlugin->isActive()) endShow();
+    if (showPlugin != nullptr) {
+        if (showClearPending) {
+            showClearPending = false;
+            controller.lcd.setBackColor(BLACK);
+            controller.lcd.clearRect(kShowX, kShowY, kShowWidth, kShowHeight);
+        }
+        showPlugin->onShowFrame(controller.lcd);
+        return;
+    }
+
+    // 2. MANAGER PAGE / RESTORES
     if (open && redraw) {
         redraw = false;
         drawPage(controller);
+    } else if (rowsRestorePending) {
+        rowsRestorePending = false;
+        restoreRows(controller);
     } else if (restorePending) {
         restorePending = false;
         restoreLanes(controller);

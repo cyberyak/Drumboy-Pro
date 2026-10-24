@@ -9,9 +9,20 @@
 
 class Lcd;
 
+// clang-format off
+
+/* Show Canvas ------------------------------------------------------*/
+// The layer-row area a show-mode plugin owns (rows 1-10, full width).
+
+const uint16_t kShowX                               = 20;               // kImageLayerX
+const uint16_t kShowY                               = 131;              // kImageLayerY[0]
+const uint16_t kShowWidth                           = 920;              // kImageLayerWidth
+const uint16_t kShowHeight                          = 310;              // 10 rows x kImageLayerHeight
+
+// clang-format on
+
 /* Plugin Interface -------------------------------------------------*/
-// Built-in (compiled-in) plugins implement this interface. The Lua runtime
-// will later be one more Plugin that forwards these calls to scripts.
+// Built-in (compiled-in) plugins and Lua scripts implement this interface.
 // All methods run in the main loop, never in interrupt context.
 // Disabled plugins receive no calls at all.
 
@@ -26,9 +37,27 @@ class Plugin {
     virtual void onEvent(const PluginEvent& event) { (void)event; }    // Called once per queued event
     virtual void onFrame(Lcd& lcd) { (void)lcd; }                      // Called at kPluginFrameInterval
 
+    // Show mode: the plugin owns the show canvas (started from the manager with ADD, ended with FILE).
+    // While showing, it also receives the keys and knobs the stock UI would otherwise get.
+    virtual bool canShow() const { return false; }
+    virtual void onShowStart() {}
+    virtual void onShowFrame(Lcd& lcd) { (void)lcd; }                  // Every frame; the canvas is cleared to black once at start
+    virtual void onShowEnd() {}
+
    protected:
     ~Plugin() {}
 };
+
+/* Audio Snapshot ---------------------------------------------------*/
+// Output peaks since the previous frame, 0..1, taken once per plugin frame.
+
+struct PluginAudio {
+    float level;                                                        // Full band
+    float bass;                                                         // Below ~150 Hz
+    float treble;                                                       // Above ~2 kHz
+};
+
+const PluginAudio& pluginHost_getAudio();
 
 void pluginHost_register(Plugin* plugin);
 uint32_t pluginHost_getDroppedEvents();
