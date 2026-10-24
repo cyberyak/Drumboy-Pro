@@ -7,4 +7,4 @@ cpu_meter = off        # Built-in: audio and main-loop CPU load (green line, top
 hook_monitor = off     # Built-in: developer view of step/note/key/encoder/MIDI events (cyan line)
 hello = off            # Lua: template showing every callback
 step_dots = off        # Lua: 16 step dots in the top-right corner
-fractal = off          # Lua: audio-reactive fractal tree (show mode: manager -> ADD)
+fractal = off          # Lua: audio-reactive fractal tree (show mode: manager -> SELECT)

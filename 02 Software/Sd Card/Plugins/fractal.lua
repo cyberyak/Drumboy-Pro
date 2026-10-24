@@ -1,7 +1,7 @@
 -- fractal.lua: audio-reactive fractal tree (show mode).
 --
 -- Enable with "fractal = on" in plugins.txt and restart. Then:
---   File menu -> press FILE (manager) -> select "fractal" -> press ADD.
+--   File menu -> press FILE (manager) -> select "fractal" -> press SELECT.
 --   Press FILE to return to the normal screen.
 --
 -- Each branch level belongs to a track: level 1 (trunk) = track 1, level 2 = track 2, ...

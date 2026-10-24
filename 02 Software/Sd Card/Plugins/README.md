@@ -9,9 +9,9 @@ Press **FILE** to open the File menu, then press **FILE** again. The manager app
 | Control | Does |
 |---|---|
 | **UP / DOWN** or knob 1 | Move the cursor |
-| **CENTER** | Plugins page: switch the selected plugin on/off. Firmware page: press twice to install (see `Firmware/README.md`) |
+| **GLOBAL** (between LEFT and RIGHT) | Plugins page: switch the selected plugin on/off. Firmware page: press twice to install (see `Firmware/README.md`) |
 | **LEFT / RIGHT** | Switch between the PLUGINS and FIRMWARE pages |
-| **ADD** | Plugins page: start the selected plugin's **show mode** (only plugins marked `ADD = SHOW`) |
+| **SELECT** (left of UP) | Plugins page: start the selected plugin's **show mode** (only plugins marked `SELECT = SHOW`) |
 | **FILE** | Close; plugin changes are saved to `plugins.txt` and apply after a restart. In show mode: return to the normal screen |
 
 While the manager is open the sequencer keeps playing, but the other keys and knobs are paused. It does not open while recording.
@@ -56,7 +56,7 @@ Coordinates may be fractional (they are rounded) and are clipped to the drawing 
 
 ### Show mode
 
-A plugin that defines `on_show_frame()` can take over the whole layer area (920×310 px, the 10 track rows) as its canvas: open the manager, select the plugin and press **ADD**. The canvas is cleared to black, and (0, 0) is its top-left corner. While showing, the sequencer keeps playing; keys and knobs go to the plugin's `on_key` / `on_encoder` instead of the stock UI; **FILE** ends the show and the track rows are redrawn. Example: `fractal.lua`.
+A plugin that defines `on_show_frame()` can take over the whole layer area (920×310 px, the 10 track rows) as its canvas: open the manager, select the plugin and press **SELECT**. The canvas is cleared to black, and (0, 0) is its top-left corner. While showing, the sequencer keeps playing; keys and knobs go to the plugin's `on_key` / `on_encoder` instead of the stock UI; **FILE** ends the show and the track rows are redrawn. Example: `fractal.lua`.
 
 ### Limits and sandbox
 

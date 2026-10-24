@@ -242,7 +242,7 @@ static void drawPage(Controller& controller) {
     char text[112];
 
     // 1. TITLE (lane 0)
-    snprintf(text, sizeof(text), "%s  %s   UP/DN MOVE  CENTER SELECT  ADD SHOW  L/R PAGE  FILE CLOSE",
+    snprintf(text, sizeof(text), "%s  %s   UP/DN MOVE  GLOBAL ON/OFF  SELECT SHOW  L/R PAGE  FILE CLOSE",
              (page == PAGE_PLUGINS) ? "[PLUGINS]" : " PLUGINS ", (page == PAGE_FIRMWARE) ? "[FIRMWARE]" : " FIRMWARE ");
     drawLane(lcd, 0, text, CYAN, FONT_05x07);
 
@@ -262,13 +262,13 @@ static void drawPage(Controller& controller) {
                 Plugin* plugin = pluginHost_getPlugin(i);
                 bool on = pluginHost_isConfigured(i);
                 bool running = pluginHost_isRunning(i);
-                const char* state = running ? (on ? (plugin->canShow() ? "RUNNING  ADD = SHOW" : "RUNNING") : "RUNNING - OFF AFTER RESTART")
+                const char* state = running ? (on ? (plugin->canShow() ? "RUNNING  SELECT = SHOW" : "RUNNING") : "RUNNING - OFF AFTER RESTART")
                                             : (on ? "ON AFTER RESTART" : "");
                 snprintf(text, sizeof(text), "%c %-3s  %-20s %-9s %s", mark, on ? "ON" : "OFF", plugin->id(), plugin->kind(), state);
                 color = on ? GREEN : GRAY;
             } else {
                 const FirmwareEntry& fw = firmware[i];
-                const char* action = (confirmIndex == (int8_t)i) ? "CENTER AGAIN: INSTALL" : "";
+                const char* action = (confirmIndex == (int8_t)i) ? "GLOBAL AGAIN: INSTALL" : "";
                 snprintf(text, sizeof(text), "%c %-30s V%u.%02u %4luKB %s", mark, fw.name, fw.major, fw.minor, (unsigned long)(fw.size / 1024), action);
                 color = (confirmIndex == (int8_t)i) ? YELLOW : WHITE;
             }
