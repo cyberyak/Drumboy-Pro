@@ -19,6 +19,7 @@ const uint32_t kPluginFrameInterval                 = 33;               // ms (~
 const char     kPluginConfigPath[]                  = "Plugins/plugins.txt";
 const uint16_t kPluginConfigMaxSize                 = 512;
 const uint32_t kPluginMessageTime                   = 6000;             // ms a message stays on screen
+const uint32_t kPluginErrorTime                     = 15000;            // ms an error stays on screen
 const uint16_t kPluginMessageX                      = 20;
 const uint16_t kPluginMessageY                      = 16;               // Second line of the empty top strip
 const uint16_t kPluginMessageWidth                  = 920;
@@ -117,7 +118,7 @@ static void drawMessage(Lcd& lcd) {
     /// @brief Draws a pending message, and clears it after kPluginMessageTime. Caller guards LCD state.
 
     uint32_t tick = HAL_GetTick();
-    if (messagePending || (messageShown && ((tick - messageTick) >= kPluginMessageTime))) {
+    if (messagePending || (messageShown && ((tick - messageTick) >= (messageError ? kPluginErrorTime : kPluginMessageTime)))) {
         lcd.setBackColor(BLACK);
         lcd.clearRect(kPluginMessageX, kPluginMessageY - 1, kPluginMessageWidth, 9);
         messageShown = false;

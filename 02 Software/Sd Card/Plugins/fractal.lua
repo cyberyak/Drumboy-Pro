@@ -39,6 +39,7 @@ for i = 1, 10 do energy[i] = 0 end
 local W, H = 920, 310
 local t = 0
 local labelKnob, labelUntil, labelShown = nil, 0, false
+local autoDepth, frameMs, fastFrames = 9, 0, 0   -- detail is lowered automatically if frames get slow
 
 local sin, cos, min, max, pi = math.sin, math.cos, math.min, math.max, math.pi
 
@@ -73,6 +74,7 @@ end
 function on_show_start()
   W, H = screen.width(), screen.height()
   hasPrev = false
+  autoDepth, fastFrames = 9, 0
   labelShown = false
 end
 
@@ -114,13 +116,14 @@ local function drawLabel()
 end
 
 function on_show_frame()
+  local started = sys.millis()
   W, H = screen.width(), screen.height()
   t = t + 0.05
   local bass, treble = audio.bass(), audio.treble()
   local react = k(6)
 
   -- 1. NEW PARAMETERS FROM KNOBS, TRACK ENERGIES AND THE MIX
-  local shrink, depth = k(4), k(5)
+  local shrink, depth = k(4), min(k(5), autoDepth)
   local reach = (1 - shrink ^ depth) / (1 - shrink)          -- total height in trunk lengths
   cur.shrink, cur.depth = shrink, depth
   cur.len = max(4, min(H * 0.95 / reach, H * 0.19 * (1 + react * (0.35 * energy[1] + 0.8 * bass)) + k(2)))
@@ -141,8 +144,18 @@ function on_show_frame()
 
   -- 3. LABELS + DECAY
   screen.color(110, 110, 110)
-  screen.text(6, 4, "FRACTAL   KNOBS 1-8   FILE EXIT")
+  local limited = (autoDepth < k(5)) and string.format("  DETAIL LIMITED TO %d", autoDepth) or ""
+  screen.text(6, 4, string.format("FRACTAL   KNOBS 1-8   FILE EXIT   %3d MS%s   ", frameMs, limited))
   drawLabel()
   local glow = k(7)
   for i = 1, 10 do energy[i] = energy[i] * glow end
+
+  -- 4. ADAPT DETAIL TO THE DEVICE'S SPEED (the frame limit is 50 ms)
+  frameMs = sys.millis() - started
+  if frameMs > 30 and autoDepth > 4 then
+    autoDepth, fastFrames = autoDepth - 1, 0
+  elseif frameMs < 12 and autoDepth < 9 then
+    fastFrames = fastFrames + 1
+    if fastFrames > 60 then autoDepth, fastFrames = autoDepth + 1, 0 end
+  end
 end

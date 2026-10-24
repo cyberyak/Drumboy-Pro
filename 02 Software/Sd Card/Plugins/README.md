@@ -63,5 +63,5 @@ A plugin that defines `on_show_frame()` can take over the whole layer area (920Ã
 - Libraries: `string`, `table`, `math`, `coroutine`, `utf8` and the basics. No `io`, `os`, `require`, `load`, `dofile` or bytecode.
 - Numbers are 32-bit (integers up to Â±2,147,483,647; floats have ~7 digits).
 - Memory: 48 KB per script, 96 KB shared by all scripts.
-- Time: `on_load` 300 ms, each event 2 ms, each `on_frame` 10 ms, each `on_show_frame` 25 ms.
+- Time: `on_load` 300 ms, each event 2 ms, each `on_frame` 10 ms, each `on_show_frame` 50 ms. Errors stay on screen for 15 s.
 - Any error, or going over a limit, stops that script and shows `LUA ERROR <name>: ...` in red. The drums keep playing; fix the file and power-cycle.

@@ -24,7 +24,7 @@ const size_t   kLuaPluginMemoryLimit                = 48 * 1024;        // Per s
 const uint32_t kLuaLoadBudgetMs                     = 300;              // Loading + on_load()
 const uint32_t kLuaEventBudgetMs                    = 2;                // Each on_<event>() call
 const uint32_t kLuaFrameBudgetMs                    = 10;               // Each on_frame() call
-const uint32_t kLuaShowBudgetMs                     = 25;               // Each on_show_frame() call (stock UI is paused)
+const uint32_t kLuaShowBudgetMs                     = 50;               // Each on_show_frame() call (stock UI is paused; LCD lines are slow)
 const int      kLuaHookInstructions                 = 1000;             // Budget check interval
 const uint16_t kLuaTextMaxLength                    = 120;
 
