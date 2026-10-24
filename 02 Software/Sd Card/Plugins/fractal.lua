@@ -7,30 +7,45 @@
 -- Each branch level belongs to a track: level 1 (trunk) = track 1, level 2 = track 2, ...
 -- A hit on a track lights its level in that track's colour and opens its branches.
 -- The kick (track 1) and the bass of the mix make the tree grow, the treble twists it,
--- tracks 9 and 10 make it sway. Knob 1 leans the tree, knob 2 changes its size.
-
-local DEPTH = 8            -- 2^8 - 1 = 255 branches
-local SHRINK = 0.68        -- each level is 68% of the one below
-local DECAY = 0.86         -- per-frame energy decay
+-- tracks 9 and 10 make it sway.
+--
+-- Knobs (while showing):
+--   1 LEAN    tilt the tree            5 DETAIL      branch levels (4-9)
+--   2 SIZE    trunk length             6 REACTION    how strongly hits open/light branches
+--   3 SPREAD  how wide branches open   7 GLOW        how long a hit stays lit
+--   4 SHAPE   shrink per level         8 COLOUR      rotate the track colours
 
 local palette = {
   {255, 60, 60}, {255, 150, 40}, {255, 230, 60}, {120, 255, 80}, {40, 220, 180},
   {60, 170, 255}, {120, 100, 255}, {210, 90, 255}, {255, 90, 190}, {230, 230, 230},
 }
 
+-- Knob-controlled settings: value, min, max, step per click, label, display format
+local knobs = {
+  {name = "LEAN",     v = 0.0,  min = -0.6, max = 0.6,  step = 0.03, fmt = "%+.2f"},
+  {name = "SIZE",     v = 0,    min = -40,  max = 40,   step = 2,    fmt = "%+d"},
+  {name = "SPREAD",   v = 0.30, min = 0.05, max = 1.2,  step = 0.03, fmt = "%.2f"},
+  {name = "SHAPE",    v = 0.68, min = 0.50, max = 0.80, step = 0.01, fmt = "%.2f"},
+  {name = "DETAIL",   v = 8,    min = 4,    max = 9,    step = 1,    fmt = "%d"},
+  {name = "REACTION", v = 1.0,  min = 0.0,  max = 2.0,  step = 0.1,  fmt = "%.1f"},
+  {name = "GLOW",     v = 0.86, min = 0.50, max = 0.97, step = 0.01, fmt = "%.2f"},
+  {name = "COLOUR",   v = 0,    min = 0,    max = 9,    step = 1,    fmt = "%d", wrap = true},
+}
+local function k(i) return knobs[i].v end
+
 local energy = {}
 for i = 1, 10 do energy[i] = 0 end
 
 local W, H = 920, 310
-local knobLean, knobSize = 0, 0
 local t = 0
+local labelKnob, labelUntil, labelShown = nil, 0, false
 
-local sin, cos, min, pi = math.sin, math.cos, math.min, math.pi
+local sin, cos, min, max, pi = math.sin, math.cos, math.min, math.max, math.pi
 
 -- Two parameter sets: the tree drawn last frame (erased in black) and the new one.
 local function newParams()
-  local p = { spread = {}, bright = {} }
-  for d = 1, DEPTH do p.spread[d], p.bright[d] = 0, 0 end
+  local p = { spread = {}, bright = {}, color = {} }
+  for d = 1, 9 do p.spread[d], p.bright[d], p.color[d] = 0, 0, 1 end
   return p
 end
 local cur, prev = newParams(), newParams()
@@ -42,16 +57,23 @@ function on_note(layer, velocity)
 end
 
 function on_encoder(knob, delta)  -- knobs reach this plugin only while it is showing
-  if knob == 1 then
-    knobLean = math.max(-0.6, math.min(0.6, knobLean + delta * 0.03))
-  elseif knob == 2 then
-    knobSize = math.max(-40, math.min(40, knobSize + delta * 2))
+  local s = knobs[knob]
+  if not s then return end
+  local v = s.v + delta * s.step
+  if s.wrap then
+    local span = s.max - s.min + 1
+    v = s.min + (v - s.min) % span
+  else
+    v = max(s.min, min(s.max, v))
   end
+  s.v = v
+  labelKnob, labelUntil = knob, sys.millis() + 1500
 end
 
 function on_show_start()
   W, H = screen.width(), screen.height()
   hasPrev = false
+  labelShown = false
 end
 
 -- Draws the whole tree for parameter set p, in its colours or in black (erase).
@@ -59,14 +81,14 @@ local p, colored
 local function branch(x, y, angle, len, d)
   local x1, y1 = x + cos(angle) * len, y - sin(angle) * len
   if colored then
-    local c, k = palette[d], p.bright[d]
-    screen.color(c[1] * k, c[2] * k, c[3] * k)
+    local c, b = palette[p.color[d]], p.bright[d]
+    screen.color(c[1] * b, c[2] * b, c[3] * b)
   end
   screen.line(x, y, x1, y1)
-  if d < DEPTH then
+  if d < p.depth then
     local s = p.spread[d]
-    branch(x1, y1, angle + s + p.twist, len * SHRINK, d + 1)
-    branch(x1, y1, angle - s + p.twist, len * SHRINK, d + 1)
+    branch(x1, y1, angle + s + p.twist, len * p.shrink, d + 1)
+    branch(x1, y1, angle - s + p.twist, len * p.shrink, d + 1)
   end
 end
 
@@ -76,18 +98,39 @@ local function drawTree(params, inColour)
   branch(W / 2, H - 2, pi / 2 + params.lean, params.len, 1)
 end
 
+local function drawLabel()
+  local now = sys.millis()
+  if labelKnob and now < labelUntil then
+    local s = knobs[labelKnob]
+    screen.color(255, 255, 255)
+    screen.font(2)
+    screen.text(W - 6, 4, string.format("KNOB %d  %s  " .. s.fmt, labelKnob, s.name, s.v), "right")
+    screen.font(1)
+    labelShown = true
+  elseif labelShown then
+    screen.clear(W - 260, 2, 258, 14)
+    labelShown = false
+  end
+end
+
 function on_show_frame()
+  W, H = screen.width(), screen.height()
   t = t + 0.05
   local bass, treble = audio.bass(), audio.treble()
+  local react = k(6)
 
-  -- 1. NEW PARAMETERS FROM TRACK ENERGIES AND THE MIX
-  cur.len = min(H * 0.30, H * 0.19 * (1 + 0.35 * energy[1] + 0.8 * bass) + knobSize)
-  cur.lean = knobLean + sin(t * 0.7) * (0.04 + 0.15 * energy[9])
-  cur.twist = sin(t * 2.3) * (0.02 + 0.6 * treble + 0.12 * energy[10])
-  for d = 1, DEPTH do
-    local e = energy[d]
-    cur.spread[d] = 0.30 + 0.45 * e
+  -- 1. NEW PARAMETERS FROM KNOBS, TRACK ENERGIES AND THE MIX
+  local shrink, depth = k(4), k(5)
+  local reach = (1 - shrink ^ depth) / (1 - shrink)          -- total height in trunk lengths
+  cur.shrink, cur.depth = shrink, depth
+  cur.len = max(4, min(H * 0.95 / reach, H * 0.19 * (1 + react * (0.35 * energy[1] + 0.8 * bass)) + k(2)))
+  cur.lean = k(1) + sin(t * 0.7) * (0.04 + 0.15 * react * energy[9])
+  cur.twist = sin(t * 2.3) * (0.02 + react * (0.6 * treble + 0.12 * energy[10]))
+  for d = 1, depth do
+    local e = min(1, energy[d] * react)
+    cur.spread[d] = k(3) + 0.45 * e
     cur.bright[d] = 0.25 + 0.75 * e
+    cur.color[d] = (d - 1 + k(8)) % 10 + 1
   end
 
   -- 2. ERASE LAST TREE, DRAW NEW ONE (no full clear: less flicker)
@@ -96,8 +139,10 @@ function on_show_frame()
   cur, prev = prev, cur
   hasPrev = true
 
-  -- 3. LABEL + DECAY
+  -- 3. LABELS + DECAY
   screen.color(110, 110, 110)
-  screen.text(6, 4, "FRACTAL   KNOB 1 LEAN   KNOB 2 SIZE   FILE EXIT")
-  for i = 1, 10 do energy[i] = energy[i] * DECAY end
+  screen.text(6, 4, "FRACTAL   KNOBS 1-8   FILE EXIT")
+  drawLabel()
+  local glow = k(7)
+  for i = 1, 10 do energy[i] = energy[i] * glow end
 end

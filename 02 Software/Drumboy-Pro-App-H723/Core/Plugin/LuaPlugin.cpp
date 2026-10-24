@@ -505,6 +505,7 @@ void LuaPlugin::onFrame(Lcd& lcd) {
 }
 
 void LuaPlugin::onShowStart() {
+    frameArea = {kShowX, kShowY, kShowWidth, kShowHeight};  // screen.width()/height() report the canvas here too
     if (L != nullptr) call("on_show_start", 0, kLuaEventBudgetMs * 5);
 }
 

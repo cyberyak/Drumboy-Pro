@@ -16,7 +16,7 @@ Show mode and an audio-reactive fractal visualizer.
 
 ### Added
 - **Show mode**: a plugin can take over the whole layer area (920×310 px, the 10 track rows). Start it from the Plugin & Firmware Manager with **ADD** on a plugin marked `ADD = SHOW`; **FILE** returns and the rows are redrawn with the stock row-drawing code. The sequencer keeps playing; keys and knobs go to the show plugin.
-- **`fractal.lua`**: audio-reactive fractal tree. Each branch level belongs to a track (level 1 = track 1, …) and lights up in that track's colour on hits; the kick and the mix's bass make it grow, treble twists it, tracks 9–10 make it sway; knob 1 leans, knob 2 sizes. Enable with `fractal = on`.
+- **`fractal.lua`**: audio-reactive fractal tree. Each branch level belongs to a track (level 1 = track 1, …) and lights up in that track's colour on hits; the kick and the mix's bass make it grow, treble twists it, tracks 9–10 make it sway. All 8 knobs control it while showing: lean, size, spread, shape, detail (4–9 levels), reaction, glow time, colour; the turned knob's name and value appear briefly. Enable with `fractal = on`.
 - **Audio tap**: output level, bass (<150 Hz) and treble (>2 kHz) peaks measured after every audio block (~200 float operations per 0.73 ms block), available to Lua as `audio.level()`, `audio.bass()`, `audio.treble()`.
 - Lua: `on_show_frame()` / `on_show_start()` / `on_show_end()` callbacks, `screen.width()` / `screen.height()`, `screen.clear()` without arguments clears the drawing area; 25 ms budget per show frame.
 
