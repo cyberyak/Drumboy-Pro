@@ -51,6 +51,10 @@ void pluginHost_beatColor(Lcd& lcd, uint8_t layer, uint8_t bank, uint8_t beatNum
 void pluginHost_fileSaved(FIL& file);
 void pluginHost_fileLoaded(FIL& file, const char* path, bool songLoaded);
 
+// Knobs on plugin pages (generator, manager, show mode): the stock page underneath may set its bottom
+// knobs to the slow on/off resolution (6 steps), which made generator knobs 5-8 need 3x more turning.
+const uint8_t kPluginEncoderResolution = 2;                     // = ENC_RES_F, as the stock value knobs
+
 #define PLUGIN_INIT(controller_)                    pluginHost_initialize(controller_)
 #define PLUGIN_UPDATE(controller_)                  pluginHost_update(controller_)
 #define PLUGIN_EVENT(type_, a_, b_, c_)             pluginHost_push((type_), (uint8_t)(a_), (uint8_t)(b_), (uint8_t)(c_))
@@ -61,6 +65,8 @@ void pluginHost_fileLoaded(FIL& file, const char* path, bool songLoaded);
 #define PLUGIN_SCREEN_CAPTURED()                    pluginHost_isScreenCaptured()
 // Key presses that still reach the stock UI while input is captured (e.g. transport in the generator).
 #define PLUGIN_KEY_PASSES(keypad_, key_)            pluginHost_keyPassesThrough((keypad_), (key_))
+// Knob resolution (quadrature steps per event): plugin pages use one fine resolution for all knobs.
+#define PLUGIN_ENCODER_RESOLUTION(res_)             (pluginHost_isCapturing() ? kPluginEncoderResolution : (res_))
 // Output level/bass/treble peaks for visual plugins; called in the I2S interrupt after each block (~200 flops).
 #define PLUGIN_AUDIO_TAP(buffer_, frames_)          pluginHost_audioTap((buffer_), (frames_))
 // Generated steps: per-step probability roll and velocity, just before a beat plays (play-timer interrupt).
@@ -80,6 +86,7 @@ void pluginHost_fileLoaded(FIL& file, const char* path, bool songLoaded);
 #define PLUGIN_INPUT_CAPTURED()                     (false)
 #define PLUGIN_SCREEN_CAPTURED()                    (false)
 #define PLUGIN_KEY_PASSES(keypad_, key_)            (true)
+#define PLUGIN_ENCODER_RESOLUTION(res_)             (res_)
 #define PLUGIN_AUDIO_TAP(buffer_, frames_)          ((void)0)
 #define PLUGIN_BEAT_GATE(layer_, bank_, beat_, start_, volume_) ((void)0)
 #define PLUGIN_BEAT_COLOR(lcd_, layer_, bank_, beat_, start_)   ((void)0)

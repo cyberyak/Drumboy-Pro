@@ -398,7 +398,7 @@ bool manager_handleEvent(const PluginEvent& e, Controller& controller) {
         if ((e.type == PLUGIN_EVENT_KEY) && (e.a == kKeypadRight) && (e.b == KEY_FILE) && e.c && wasFileMenu &&
             (controller.getMenu() == FILE_MENU)) {
             if (controller.isRecording()) {
-                pluginHost_message("STOP RECORDING TO OPEN THE PLUGIN & FIRMWARE MANAGER", true);
+                pluginHost_message("STOP RECORDING TO OPEN THE PLUGIN AND FIRMWARE MANAGER", true);  // The LCD font has no &
             } else {
                 openManager(controller);
             }

@@ -3038,6 +3038,7 @@ void Controller::encoder_read() {
                         else if (res == ENC_RES_M)
                             res = ENC_RES_F;
                     }
+                    res = PLUGIN_ENCODER_RESOLUTION(res);
 
                     // 5. ACTION EMISSION
                     if (direction == 1) {  // CW
