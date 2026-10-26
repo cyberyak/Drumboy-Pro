@@ -178,9 +178,11 @@ static SDL_Texture* renderArt(SDL_Renderer* renderer, float scale) {
 /* Audio --------------------------------------------------------- */
 
 static SDL_AudioStream* audioStream = nullptr;
+static std::mutex audioMutex;                                   // The audio thread feeds the stream while the window may close it
 
 static void playBlock(const int32_t* frames, uint32_t count) {
     float out[64 * 2];
+    std::lock_guard<std::mutex> lock(audioMutex);
     if (!audioStream || count > 64) return;
     // Keep at most ~60 ms queued: the simulated clock and the sound card drift apart
     if (SDL_GetAudioStreamQueued(audioStream) > static_cast<int>(44100 * 0.06 * sizeof(out[0]) * 2)) return;
@@ -410,8 +412,7 @@ int windowRun() {
                         break;
                     }
                     if ((e.key.mod & SDL_KMOD_GUI) && e.key.scancode == SDL_SCANCODE_R && down) {
-                        SDL_Quit();
-                        restart();                              // Power cycle (e.g. after switching plugins)
+                        restart();                              // Power cycle (e.g. after switching plugins); exec releases SDL
                     }
                     if (e.key.mod & SDL_KMOD_GUI) break;         // Other Cmd shortcuts are not panel keys
                     if (e.key.scancode == SDL_SCANCODE_LALT || e.key.scancode == SDL_SCANCODE_RALT) {
@@ -491,7 +492,11 @@ int windowRun() {
 
     active = false;
     audioSetOutput(nullptr);
-    if (audioStream) SDL_DestroyAudioStream(audioStream);
+    {
+        std::lock_guard<std::mutex> lock(audioMutex);
+        if (audioStream) SDL_DestroyAudioStream(audioStream);
+        audioStream = nullptr;
+    }
     SDL_Quit();
     return 0;
 }

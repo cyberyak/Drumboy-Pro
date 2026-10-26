@@ -42,8 +42,14 @@ def main(argv):
     failed = False
     reader = sock.makefile("r")
     for command in commands:
-        sock.sendall((command + "\n").encode())
-        reply = reader.readline().rstrip("\n")
+        try:
+            sock.sendall((command + "\n").encode())
+            reply = reader.readline().rstrip("\n")
+        except OSError:
+            reply = ""                                      # Connection closed (the simulator quit or restarted)
+        if not reply and command.split()[0] not in ("quit", "restart"):
+            print("error connection closed")
+            return 1
         if not reply and command.split()[0] in ("quit", "restart"):
             reply = "ok"                                    # The simulator exits / re-execs without replying
         print(reply)
