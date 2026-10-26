@@ -226,6 +226,7 @@ uint8_t gen_generate(GenRole role, const GenParams& p, uint8_t stepsPerBar, uint
     static GenStep candidates[12 * 48] GEN_WORK_SECTION;  // 3.5 KB, CPU-only
     uint16_t candidateCount = 0;
 
+    const uint32_t barSeed = p.seed ^ (p.mutation * 0x9E3779B9u);  // EVOLVE re-rolls details, not the groove
     int32_t density = clampi((int32_t)p.density + r.densityBias, 0, 100);
     int32_t threshold = 100 - density;
 
@@ -243,10 +244,10 @@ uint8_t gen_generate(GenRole role, const GenParams& p, uint8_t stepsPerBar, uint
             bool anchor = (w >= 95);
             if (!anchor && w > 0) {
                 w += (int32_t)((rnd(p.seed, trackIndex, 0xFFFF, s, RS_BASE) - 0.5f) * 24.0f);
-                w += (int32_t)((rnd(p.seed, trackIndex, bar, s, RS_BAR) - 0.5f) * p.variation * 0.8f);
+                w += (int32_t)((rnd(barSeed, trackIndex, bar, s, RS_BAR) - 0.5f) * p.variation * 0.8f);
             } else if (!anchor && w == 0 && p.variation > 0) {
                 // Rare surprise hits on empty steps, more with variation
-                if (rnd(p.seed, trackIndex, bar, s, RS_BAR) < p.variation * 0.0012f) w = 60;
+                if (rnd(barSeed, trackIndex, bar, s, RS_BAR) < p.variation * 0.0012f) w = 60;
             }
             if (r.complement && (occupied != nullptr) && (occupied[songStep >> 5] & (1u << (songStep & 31)))) w = w * 4 / 10;
 
@@ -289,8 +290,8 @@ uint8_t gen_generate(GenRole role, const GenParams& p, uint8_t stepsPerBar, uint
             } else {
                 int32_t base = 50 + w * 77 / 100;
                 velocity = 127 - (127 - base) * p.dynamics / 100;
-                velocity += (int32_t)((rnd(p.seed, trackIndex, bar, s, RS_VEL) - 0.5f) * p.dynamics * 0.2f);
-                if (!anchor && (w < 70) && (rnd(p.seed, trackIndex, bar, s, RS_GHOST) * 100.0f < r.ghost)) {
+                velocity += (int32_t)((rnd(barSeed, trackIndex, bar, s, RS_VEL) - 0.5f) * p.dynamics * 0.2f);
+                if (!anchor && (w < 70) && (rnd(barSeed, trackIndex, bar, s, RS_GHOST) * 100.0f < r.ghost)) {
                     velocity = 22 + velocity * (100 - p.dynamics / 2) / 300;  // Ghost note
                 }
             }
@@ -307,8 +308,8 @@ uint8_t gen_generate(GenRole role, const GenParams& p, uint8_t stepsPerBar, uint
             uint8_t ratchet = fillRatchet;
             if (ratchet == 0 && p.ratchet > 0) {
                 float chance = p.ratchet * 0.01f * r.ratchetBias * 0.01f * (anchor ? 0.35f : 1.0f);
-                if (rnd(p.seed, trackIndex, bar, s, RS_RATCHET) < chance) {
-                    float n = rnd(p.seed, trackIndex, bar, s, RS_RATCHET_N);
+                if (rnd(barSeed, trackIndex, bar, s, RS_RATCHET) < chance) {
+                    float n = rnd(barSeed, trackIndex, bar, s, RS_RATCHET_N);
                     ratchet = (n < 0.55f) ? 2 : (n < 0.85f) ? 3 : 4;
                 }
             }
@@ -316,7 +317,7 @@ uint8_t gen_generate(GenRole role, const GenParams& p, uint8_t stepsPerBar, uint
             // 6. TIMING: swing on every second 16th, humanize (scaled per role)
             int32_t tick = (int32_t)songStep * kGenTicksPerStep;
             if (s & 1) tick += ((int32_t)p.swing * 4) - 200;  // 50% straight .. 75% = +100 ticks
-            float spread = (rnd(p.seed, trackIndex, bar, s, RS_HUMAN_A) + rnd(p.seed, trackIndex, bar, s, RS_HUMAN_B) - 1.0f);
+            float spread = (rnd(barSeed, trackIndex, bar, s, RS_HUMAN_A) + rnd(barSeed, trackIndex, bar, s, RS_HUMAN_B) - 1.0f);
             tick += (int32_t)(spread * p.humanize * 0.35f * r.humanizeScale * 0.01f);
             if (tick < 0) tick = 0;
 

@@ -5844,6 +5844,7 @@ SdResult Controller::sd_loadFile(uint8_t fileNum_) {
             result = SD_OK;
         }
         f_close(&sd.file);
+        PLUGIN_FILE_LOADED(sd.file, fileName, phaseCheck[1]);  // Reads the extension block, if any
     }
 
     // 8. INPUT RESTORATION
@@ -6114,6 +6115,7 @@ SdResult Controller::sd_saveFile(uint8_t fileNum_) {
                 if (errorCount == 0) {
                     if (f_write(&sd.file, eof, strlen(eof), &sd.byteswritten) == FR_OK) {
                         result = SD_OK;
+                        PLUGIN_FILE_SAVE(sd.file);  // Extension block after the stock EOF (stock loaders ignore it)
                     }
                 }
             }

@@ -32,18 +32,21 @@ Each track gets a role from its instrument folder (Kick, Snare, HHClosed, Cowbel
 | Knob 6 DYNAMICS | Accents vs ghost notes |
 | Knob 7 PROBABILITY | How many steps play less than 100% of the time |
 | Knob 8 RATCHET | Chance of ratchets / rolls |
-| **GLOBAL** | Generate all unlocked tracks |
-| **PASTE** | New random seed, then generate |
-| **CLEAR** | Undo the last generation |
+| **GLOBAL** | Generate all unlocked tracks with the current seed (turn knobs, press again: same groove, new settings) |
+| **PASTE** | New random seed, then generate — press repeatedly for new patterns |
+| **MUTE** | Re-roll only the selected track |
+| **LEFT / RIGHT** | History: step back / forward through the last 8 generated patterns |
+| **CLEAR** | Undo the last change |
 | **UP / DOWN** or a layer key | Select a track |
 | **SELECT** | Lock / unlock the selected track (locked tracks are kept) |
 | **COPY** | Change the selected track's role (AUTO → KICK → SNARE → …) |
-| **LEFT / RIGHT** | Phrase fill: off / every 2 / 4 / 8 bars |
+| **SONG** | Phrase fill: off / every 2 / 4 / 8 bars |
+| **REC** | EVOLVE: off / every 4 / 8 bars — while playing, a couple of unlocked tracks re-roll their details (ghosts, ratchets, extra hits) at that interval, keeping the groove; works with the generator closed too |
 | **FILE** (or FILL + STYLE) | Close |
 
 Beat ticks are coloured by probability: track colour = always, **green** ≥ 70%, **yellow** ≥ 45%, **orange** ≥ 20%, **red** below. Ratchets use the stock fills, so the generator switches a track's **F** on when it gets ratchets.
 
-Probability and velocity per step are kept in memory while the Drumboy is on; after saving and reloading a file the generated beats are still there but play at full probability and velocity (saving those values comes later).
+**Saved with the File:** File → SAVE also stores each generated step's probability and velocity and the generator settings (style, knobs, seed, locks, roles, fill, evolve) in an extension block after the stock data. Stock firmware still loads these files (it ignores the block); saving with stock firmware drops the block but keeps the beats.
 
 ## Built-in plugins
 

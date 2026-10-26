@@ -33,6 +33,8 @@ struct PluginEvent {
 
 #ifdef DRUMBOY_PLUGINS
 
+#include "ff.h"
+
 class Controller;
 class Lcd;
 
@@ -46,6 +48,8 @@ bool pluginHost_keyPassesThrough(uint8_t keypad, uint8_t key);
 void pluginHost_audioTap(const uint32_t* interleaved, uint16_t frames);
 void pluginHost_beatGate(uint8_t layer, uint8_t bank, uint8_t beatNum, uint16_t startInterval, float& volume);
 void pluginHost_beatColor(Lcd& lcd, uint8_t layer, uint8_t bank, uint8_t beatNum, uint16_t startInterval);
+void pluginHost_fileSaved(FIL& file);
+void pluginHost_fileLoaded(FIL& file, const char* path, bool songLoaded);
 
 #define PLUGIN_INIT(controller_)                    pluginHost_initialize(controller_)
 #define PLUGIN_UPDATE(controller_)                  pluginHost_update(controller_)
@@ -63,6 +67,9 @@ void pluginHost_beatColor(Lcd& lcd, uint8_t layer, uint8_t bank, uint8_t beatNum
 #define PLUGIN_BEAT_GATE(layer_, bank_, beat_, start_, volume_) pluginHost_beatGate((layer_), (bank_), (beat_), (start_), (volume_))
 // Generated steps: beat tick colour by probability (lcd_drawBeat, non-selected beats).
 #define PLUGIN_BEAT_COLOR(lcd_, layer_, bank_, beat_, start_)   pluginHost_beatColor((lcd_), (layer_), (bank_), (beat_), (start_))
+// Files: append / read the cyberyak extension block (generator data) after the stock EOF marker.
+#define PLUGIN_FILE_SAVE(file_)                     pluginHost_fileSaved(file_)
+#define PLUGIN_FILE_LOADED(file_, path_, ok_)       pluginHost_fileLoaded((file_), (path_), (ok_))
 
 #else
 
@@ -76,6 +83,8 @@ void pluginHost_beatColor(Lcd& lcd, uint8_t layer, uint8_t bank, uint8_t beatNum
 #define PLUGIN_AUDIO_TAP(buffer_, frames_)          ((void)0)
 #define PLUGIN_BEAT_GATE(layer_, bank_, beat_, start_, volume_) ((void)0)
 #define PLUGIN_BEAT_COLOR(lcd_, layer_, bank_, beat_, start_)   ((void)0)
+#define PLUGIN_FILE_SAVE(file_)                     ((void)0)
+#define PLUGIN_FILE_LOADED(file_, path_, ok_)       ((void)0)
 
 #endif
 

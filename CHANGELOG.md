@@ -10,6 +10,20 @@ Custom Drumboy Pro firmware by cyberyak (fork of [Randomwaves/Drumboy-Pro](https
 
 ## [Unreleased]
 
+## [1.01-cy.7]
+
+Generator: saving, single-track re-roll, history, EVOLVE.
+
+### Added
+- **Saved with the File**: File → SAVE appends a versioned, CRC-checked **CYBX extension block** after the stock EOF marker (per-step probability and velocity of generated beats, plus generator settings, seed, per-track re-roll salts, locks, role overrides, fill and evolve). Loading restores it. Stock firmware ignores the block (it never reads past its EOF); a stock save drops it but keeps the beats. Damaged blocks are reported and skipped.
+- **MUTE**: re-roll only the selected track.
+- **LEFT / RIGHT**: history of the last 8 generated patterns (settings, seed and per-track re-rolls).
+- **REC**: EVOLVE every 4 or 8 bars while playing — a couple of unlocked tracks re-roll their per-bar details (new `mutation` value in the engine; the base groove stays). Runs with the generator page closed too.
+
+### Changed
+- Phrase fill moved from LEFT/RIGHT to **SONG**.
+- Lanes are not redrawn behind the manager or show mode when EVOLVE changes a track (they are restored on exit).
+
 ## [1.01-cy.6]
 
 Pattern generator.

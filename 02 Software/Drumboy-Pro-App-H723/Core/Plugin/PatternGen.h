@@ -40,7 +40,8 @@ struct GenParams {
     uint8_t probability;                                                // 0-100: how many steps get < 100% chance
     uint8_t ratchet;                                                    // 0-100: chance of ratchets / rolls
     uint8_t fillEvery;                                                  // 0 = off, else phrase fill every N bars
-    uint32_t seed;
+    uint32_t seed;                                                      // Base groove
+    uint32_t mutation;                                                  // Per-bar details only (EVOLVE); 0 = none
 };
 
 struct GenStep {

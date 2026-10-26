@@ -23,13 +23,21 @@ const uint8_t  kKeypadLeft                          = 1;
 const uint8_t  kKeypadRight                         = 2;
 const uint16_t kGenTextX                            = 20;
 const uint16_t kGenLine1Y                           = 6;                // Parameters (where the CPU meter line is)
-const uint16_t kGenLine2Y                           = 16;               // Selected track / status / hints
+const uint16_t kGenLine2Y                           = 16;               // Selected track / status / keys
 const uint16_t kGenTextWidth                        = 920;
 const uint16_t kGenMarkerX                          = 6;                // Left margin beside the track rows
 const uint32_t kGenStatusMs                         = 4000;
 const uint32_t kGenRedrawMs                         = 500;
-const uint8_t  kGenFillChoices[]                    = {0, 2, 4, 8};
+const uint8_t  kGenFillChoices[]                    = {0, 2, 4, 8};     // Phrase fill every N bars
+const uint8_t  kGenEvolveChoices[]                  = {0, 4, 8};        // EVOLVE every N bars
+const uint8_t  kGenEvolveTracks                     = 2;                // Tracks re-rolled per EVOLVE
+const uint8_t  kGenHistorySize                      = 8;
 const uint16_t kGenSongStepsMax                     = 12 * 48;          // 12 bars of 12/4
+
+// File extension block: [payload][crc32][payload length]["CYBX"] after the stock EOF marker
+const char     kGenBlockMagic[4]                    = {'C', 'Y', 'B', 'X'};
+const uint8_t  kGenBlockVersion                     = 1;
+const uint16_t kGenBlockMaxPayload                  = 32768;
 
 // clang-format on
 
@@ -50,10 +58,12 @@ struct PluginAccess {
     static void setFill(Controller& c, uint8_t layer, bool on) { c.layerInst_setFill(layer, on); }
 };
 
+extern Controller controller;                                           // main.cpp (file hooks run before the plugin host starts)
+
 /* Step Meta (per generated beat) -----------------------------------*/
 // Probability and velocity the stock beat format can't hold. Keyed by beat slot
 // and validated against the beat's start tick, so beats edited by hand afterwards
-// simply play normally.
+// simply play normally. Saved in the File's extension block.
 
 struct StepMeta {
     uint16_t tick;
@@ -63,7 +73,7 @@ struct StepMeta {
 
 static StepMeta meta[kGenTracks][kBankLibrarySize][kBeatLibrarySize] GEN_FAST_SECTION;
 
-/* Undo (one level: the bank as it was before the last generation) --*/
+/* Undo (one level: the bank as it was before the last change) -----*/
 
 static Bank undoBanks[kGenTracks] GEN_FAST_SECTION;
 static StepMeta undoMeta[kGenTracks][kBeatLibrarySize] GEN_FAST_SECTION;
@@ -71,9 +81,26 @@ static bool undoFill[kGenTracks];
 static uint8_t undoBank = 0;
 static bool undoValid = false;
 
-/* Page State -------------------------------------------------------*/
+/* Settings, History, Page State ------------------------------------*/
 
 enum GenKnob : uint8_t { KNOB_STYLE, KNOB_DENSITY, KNOB_VARIATION, KNOB_SWING, KNOB_HUMANIZE, KNOB_DYNAMICS, KNOB_PROBABILITY, KNOB_RATCHET };
+
+struct GenSettings {
+    GenParams params;
+    uint32_t salt[kGenTracks];                                          // Per-track re-roll offset
+    uint8_t fillChoice;
+};
+
+static GenSettings settings = {{STYLE_TECHNO, 60, 30, 50, 20, 60, 40, 20, 4, 1, 0}, {}, 2};
+static uint8_t evolveChoice = 0;
+static bool locked[kGenTracks];
+static int8_t roleOverride[kGenTracks];                                // -1 = automatic
+static GenRole detected[kGenTracks];
+
+static GenSettings history[kGenHistorySize];
+static uint8_t historyCount = 0;                                        // Entries stored
+static uint8_t historyNewest = 0;                                       // Ring index of the newest entry
+static uint8_t historyBack = 0;                                         // 0 = newest, 1 = one older, ...
 
 static bool open = false;
 static bool clearPending = false;
@@ -82,20 +109,37 @@ static bool dirty = false;
 static uint32_t lastDrawTick = 0;
 static uint8_t selected = 0;
 static uint8_t markerRow = 0xFF;
-static bool locked[kGenTracks];
-static int8_t roleOverride[kGenTracks];                                // -1 = automatic
-static GenRole detected[kGenTracks];
-static uint8_t fillChoice = 2;                                          // Index into kGenFillChoices
-static GenParams params = {STYLE_TECHNO, 60, 30, 50, 20, 60, 40, 20, 4, 1};
 static char status[112] = "";
 static bool statusError = false;
 static uint32_t statusUntil = 0;
+
+static uint16_t evolveBarCount = 0;
+static uint32_t evolveRandom = 0x9E3779B9u;
+
 static GenStep steps[kGenMaxSteps];
 static uint32_t occupied[(kGenSongStepsMax + 31) / 32];
-
 static uint32_t gateRandom = 0x2545F491u;
+static bool stateReady = false;
+
+static void ensureState() {
+    // DTCM is not zeroed at boot; set up once, by whichever runs first (boot-time File load or plugin start)
+    if (stateReady) return;
+    memset(meta, 0, sizeof(meta));
+    for (uint8_t i = 0; i < kGenTracks; i++) {
+        roleOverride[i] = -1;
+        locked[i] = false;
+    }
+    stateReady = true;
+}
 
 /* Helpers ----------------------------------------------------------*/
+
+static uint32_t nextRandom(uint32_t& state) {
+    state ^= state << 13;
+    state ^= state >> 17;
+    state ^= state << 5;
+    return state;
+}
 
 static GenRole roleOf(uint8_t track) {
     return (roleOverride[track] >= 0) ? (GenRole)roleOverride[track] : detected[track];
@@ -123,10 +167,27 @@ static void detectRoles(Controller& c) {
     }
 }
 
-static void markOccupied(uint16_t tick, uint8_t beatsPerBar) {
-    (void)beatsPerBar;
+static void markOccupied(uint16_t tick) {
     uint16_t step = (tick + kGenTicksPerStep / 2) / kGenTicksPerStep;
     if (step < kGenSongStepsMax) occupied[step >> 5] |= (1u << (step & 31));
+}
+
+static void buildOccupied(Controller& c, uint8_t bank, uint16_t regenerateMask) {
+    // Kick / snare / clap tracks that are NOT being regenerated guide the percussion with their current beats
+    memset(occupied, 0, sizeof(occupied));
+    for (uint8_t i = 0; i < kGenTracks; i++) {
+        if ((regenerateMask & (1u << i)) || !isBackbone(roleOf(i))) continue;
+        Bank& b = PluginAccess::layer(c, i).bankLibrary[bank];
+        for (int16_t k = 0; k <= b.lastActiveBeatNum; k++) markOccupied(b.beatLibrary[k].getStartInterval());
+    }
+}
+
+static uint16_t unlockedMask() {
+    uint16_t mask = 0;
+    for (uint8_t i = 0; i < kGenTracks; i++) {
+        if (!locked[i]) mask |= (1u << i);
+    }
+    return mask;
 }
 
 /* Writing Tracks ---------------------------------------------------*/
@@ -157,7 +218,7 @@ static void writeTrack(Controller& c, uint8_t track, uint8_t bank, const GenStep
         uint16_t next = ((k + 1 < count) && (list[k + 1].tick < song)) ? list[k + 1].tick : song;
         if (next <= start) continue;
 
-        uint8_t pattern = 0;                                            // FLAT
+        uint8_t pattern = 0;  // FLAT
         float base = 1.0f;
         uint16_t end = next;
         if (list[k].ratchet) {
@@ -165,7 +226,7 @@ static void writeTrack(Controller& c, uint8_t track, uint8_t bank, const GenStep
             end = (next - start > kGenTicksPerStep) ? start + kGenTicksPerStep : next;
             anyRatchet = true;
         } else if (list[k].velocity < 60) {
-            pattern = 1;                                                // GHOST (stock plays it at 50%)
+            pattern = 1;  // GHOST (stock plays it at 50%)
             base = 0.5f;
         }
 
@@ -182,7 +243,8 @@ static void writeTrack(Controller& c, uint8_t track, uint8_t bank, const GenStep
     __set_PRIMASK(primask);
 
     if (anyRatchet && !layer.fill) PluginAccess::setFill(c, track, true);  // Ratchet repeats only sound with F on
-    if (bank == PluginAccess::activeBank(c)) PluginAccess::drawSong(c, track, bank);
+    // Redraw the lane unless a plugin page (manager / show mode) owns that screen area; it restores the lanes itself
+    if ((bank == PluginAccess::activeBank(c)) && !pluginHost_isScreenCaptured()) PluginAccess::drawSong(c, track, bank);
 }
 
 static void snapshot(Controller& c, uint8_t bank) {
@@ -219,40 +281,114 @@ static void undo(Controller& c) {
     setStatus(false, "UNDONE - BANK %u IS BACK TO HOW IT WAS", undoBank + 1);
 }
 
-static void generate(Controller& c, bool newSeed) {
+static uint8_t regenerate(Controller& c, uint16_t mask, const uint32_t* mutation) {
+    /// @brief Regenerates the tracks in 'mask' (kick/snare/clap first so percussion can avoid them).
+    /// 'mutation' (per track, may be null) re-rolls per-bar details only (EVOLVE).
+
     uint8_t bank = PluginAccess::activeBank(c);
-    uint8_t beatsPerBar = PluginAccess::beatsPerBar(c);
-    uint8_t stepsPerBar = beatsPerBar * 4;
+    uint8_t stepsPerBar = PluginAccess::beatsPerBar(c) * 4;
     uint8_t bars = PluginAccess::bars(c);
+    buildOccupied(c, bank, mask);
 
-    if (newSeed) params.seed = (params.seed * 1103515245u + 12345u + HAL_GetTick()) % 10000u;
-    params.fillEvery = kGenFillChoices[fillChoice];
-    snapshot(c, bank);
-
-    // 1. LOCKED BACKBONE TRACKS STILL GUIDE THE PERCUSSION
-    memset(occupied, 0, sizeof(occupied));
-    for (uint8_t i = 0; i < kGenTracks; i++) {
-        if (!locked[i] || !isBackbone(roleOf(i))) continue;
-        Bank& b = PluginAccess::layer(c, i).bankLibrary[bank];
-        for (int16_t k = 0; k <= b.lastActiveBeatNum; k++) markOccupied(b.beatLibrary[k].getStartInterval(), beatsPerBar);
-    }
-
-    // 2. KICK / SNARE / CLAP FIRST, THEN EVERYTHING ELSE
     uint8_t generated = 0;
     for (uint8_t pass = 0; pass < 2; pass++) {
         for (uint8_t i = 0; i < kGenTracks; i++) {
             GenRole role = roleOf(i);
-            if (locked[i] || (isBackbone(role) != (pass == 0))) continue;
-            uint8_t n = gen_generate(role, params, stepsPerBar, bars, i, occupied, steps);
+            if (!(mask & (1u << i)) || (isBackbone(role) != (pass == 0))) continue;
+
+            GenParams p = settings.params;
+            p.fillEvery = kGenFillChoices[settings.fillChoice];
+            p.seed ^= settings.salt[i] * 0x9E3779B9u;
+            p.mutation = (mutation != nullptr) ? mutation[i] : 0;
+
+            uint8_t n = gen_generate(role, p, stepsPerBar, bars, i, occupied, steps);
             writeTrack(c, i, bank, steps, n);
             if (isBackbone(role)) {
-                for (uint8_t k = 0; k < n; k++) markOccupied(steps[k].tick, beatsPerBar);
+                for (uint8_t k = 0; k < n; k++) markOccupied(steps[k].tick);
             }
             generated++;
         }
     }
-    setStatus(false, "GENERATED %u TRACKS (%s, SEED %lu) INTO BANK %u - FILE > SAVE TO KEEP, CLEAR = UNDO", generated,
-              kGenStyleNames[params.style], (unsigned long)params.seed, bank + 1);
+    return generated;
+}
+
+/* History ----------------------------------------------------------*/
+
+static void historyPush() {
+    historyNewest = (historyCount == 0) ? 0 : (historyNewest + 1) % kGenHistorySize;
+    history[historyNewest] = settings;
+    if (historyCount < kGenHistorySize) historyCount++;
+    historyBack = 0;
+}
+
+static void historyGo(Controller& c, int8_t direction) {
+    // direction -1 = older (LEFT), +1 = newer (RIGHT)
+    if (historyCount == 0) {
+        setStatus(true, "NO HISTORY YET - GENERATE FIRST");
+        return;
+    }
+    int16_t back = (int16_t)historyBack - direction;
+    if ((back < 0) || (back >= historyCount)) {
+        setStatus(true, (direction < 0) ? "OLDEST PATTERN IN HISTORY" : "NEWEST PATTERN IN HISTORY");
+        return;
+    }
+    historyBack = (uint8_t)back;
+    settings = history[(historyNewest + kGenHistorySize - historyBack) % kGenHistorySize];
+
+    snapshot(c, PluginAccess::activeBank(c));
+    regenerate(c, unlockedMask(), nullptr);
+    setStatus(false, "HISTORY %u/%u: %s SEED %lu", historyCount - historyBack, historyCount, kGenStyleNames[settings.params.style],
+              (unsigned long)settings.params.seed);
+}
+
+/* Actions ----------------------------------------------------------*/
+
+static void generateAll(Controller& c, bool newSeed) {
+    if (newSeed) {
+        settings.params.seed = (settings.params.seed * 1103515245u + 12345u + HAL_GetTick()) % 10000u;
+        memset(settings.salt, 0, sizeof(settings.salt));
+    }
+    uint8_t bank = PluginAccess::activeBank(c);
+    snapshot(c, bank);
+    uint8_t n = regenerate(c, unlockedMask(), nullptr);
+    historyPush();
+    setStatus(false, "GENERATED %u TRACKS (%s, SEED %lu) INTO BANK %u - FILE > SAVE TO KEEP, CLEAR = UNDO", n,
+              kGenStyleNames[settings.params.style], (unsigned long)settings.params.seed, bank + 1);
+}
+
+static void rerollSelected(Controller& c) {
+    if (locked[selected]) {
+        setStatus(true, "TRACK %02u IS LOCKED - SELECT UNLOCKS IT", selected + 1);
+        return;
+    }
+    settings.salt[selected] = nextRandom(evolveRandom) | 1u;
+    snapshot(c, PluginAccess::activeBank(c));
+    regenerate(c, (uint16_t)(1u << selected), nullptr);
+    historyPush();
+    setStatus(false, "RE-ROLLED TRACK %02u (%s) - CLEAR = UNDO", selected + 1, kGenRoleNames[roleOf(selected)]);
+}
+
+static void evolve(Controller& c) {
+    /// @brief Re-rolls the per-bar details of a few unlocked tracks (base groove stays), while playing.
+
+    uint16_t candidates = unlockedMask();
+    uint16_t mask = 0;
+    uint32_t mutation[kGenTracks] = {};
+    for (uint8_t n = 0; (n < kGenEvolveTracks) && candidates; n++) {
+        uint8_t pick = nextRandom(evolveRandom) % kGenTracks;
+        for (uint8_t k = 0; k < kGenTracks; k++) {
+            uint8_t i = (pick + k) % kGenTracks;
+            if (candidates & (1u << i)) {
+                mask |= (1u << i);
+                candidates &= ~(1u << i);
+                mutation[i] = nextRandom(evolveRandom) | 1u;
+                break;
+            }
+        }
+    }
+    if (mask == 0) return;
+    regenerate(c, mask, mutation);
+    if (open) setStatus(false, "EVOLVED %s%s", kGenRoleNames[roleOf(__builtin_ctz(mask))], (mask & (mask - 1)) ? " + 1 MORE TRACK" : "");
 }
 
 /* Drawing ----------------------------------------------------------*/
@@ -266,18 +402,20 @@ static void drawMarker(Lcd& lcd, uint8_t row, bool on) {
 static void drawLines(Controller& c) {
     Lcd& lcd = c.lcd;
     char text[140];
+    const GenParams& p = settings.params;
 
     lcd.setFont(FONT_05x07);
     lcd.setAlignment(LEFT);
     lcd.setBackColor(BLACK);
     lcd.clearRect(kGenTextX, kGenLine1Y - 1, kGenTextWidth, 19);
 
-    // 1. PARAMETERS (knobs 1-8, LEFT/RIGHT fill)
-    char fill[12];
-    (kGenFillChoices[fillChoice] == 0) ? snprintf(fill, sizeof(fill), "OFF") : snprintf(fill, sizeof(fill), "%u BARS", kGenFillChoices[fillChoice]);
-    snprintf(text, sizeof(text), "GENERATOR  %s  DENS %u  VAR %u  SWING %u  HUMAN %u  DYN %u  PROB %u  RATCH %u  FILL %s  SEED %lu",
-             kGenStyleNames[params.style], params.density, params.variation, params.swing, params.humanize, params.dynamics,
-             params.probability, params.ratchet, fill, (unsigned long)params.seed);
+    // 1. PARAMETERS (kept short: the File menu's build label sits at the right end of this line)
+    char fill[8], evo[8];
+    (kGenFillChoices[settings.fillChoice] == 0) ? snprintf(fill, sizeof(fill), "OFF") : snprintf(fill, sizeof(fill), "%u", kGenFillChoices[settings.fillChoice]);
+    (kGenEvolveChoices[evolveChoice] == 0) ? snprintf(evo, sizeof(evo), "OFF") : snprintf(evo, sizeof(evo), "%u", kGenEvolveChoices[evolveChoice]);
+    snprintf(text, sizeof(text), "GEN %s  DENS %u  VAR %u  SWING %u  HUM %u  DYN %u  PROB %u  RATCH %u  FILL %s  EVOLVE %s  SEED %lu",
+             kGenStyleNames[p.style], p.density, p.variation, p.swing, p.humanize, p.dynamics, p.probability, p.ratchet, fill, evo,
+             (unsigned long)p.seed);
     lcd.setForeColor(CYAN);
     lcd.drawText(text, strlen(text), kGenTextX, kGenLine1Y);
 
@@ -286,9 +424,8 @@ static void drawLines(Controller& c) {
         lcd.setForeColor(statusError ? RED : YELLOW);
         lcd.drawText(status, strlen(status), kGenTextX, kGenLine2Y);
     } else {
-        GenRole role = roleOf(selected);
-        snprintf(text, sizeof(text), "TRACK %02u %s%s%s   GLOBAL GENERATE  PASTE NEW SEED  CLEAR UNDO  SELECT LOCK  COPY ROLE  L/R FILL  FILE CLOSE",
-                 selected + 1, kGenRoleNames[role], (roleOverride[selected] >= 0) ? " (SET)" : " (AUTO)", locked[selected] ? "  LOCKED" : "");
+        snprintf(text, sizeof(text), "TRK %02u %s %s%s | GLOBAL GEN  PASTE NEW  MUTE TRK  L/R HIST  CLEAR UNDO  SELECT LOCK  COPY ROLE  SONG FILL  REC EVOLVE",
+                 selected + 1, kGenRoleNames[roleOf(selected)], (roleOverride[selected] >= 0) ? "SET" : "AUTO", locked[selected] ? " LOCK" : "");
         lcd.setForeColor(WHITE);
         lcd.drawText(text, strlen(text), kGenTextX, kGenLine2Y);
     }
@@ -299,6 +436,184 @@ static void drawLines(Controller& c) {
         markerRow = selected;
     }
     drawMarker(lcd, markerRow, true);
+}
+
+/* File Extension Block ---------------------------------------------*/
+// Payload: version, settings, salts, locks, role overrides, then one 7-byte record per
+// generated beat (track, bank, beat, probability, gain, tick). Written and read in small
+// pieces so FatFs copies through the FIL buffer (DMA never touches DTCM).
+
+static uint32_t crc32Update(uint32_t crc, const uint8_t* data, uint32_t len) {
+    crc = ~crc;
+    for (uint32_t i = 0; i < len; i++) {
+        crc ^= data[i];
+        for (uint8_t b = 0; b < 8; b++) crc = (crc >> 1) ^ (0xEDB88320 & (0u - (crc & 1)));
+    }
+    return ~crc;
+}
+
+struct BlockWriter {
+    FIL* file;
+    uint32_t crc;
+    uint32_t length;
+    bool ok;
+    void put(const void* data, uint16_t n) {
+        UINT written = 0;
+        if (ok && ((f_write(file, data, n, &written) != FR_OK) || (written != n))) ok = false;
+        crc = crc32Update(crc, (const uint8_t*)data, n);
+        length += n;
+    }
+};
+
+struct BlockReader {
+    FIL* file;
+    uint32_t crc;
+    bool ok;
+    void get(void* data, uint16_t n) {
+        UINT bytesRead = 0;
+        if (ok && ((f_read(file, data, n, &bytesRead) != FR_OK) || (bytesRead != n))) ok = false;
+        if (ok) crc = crc32Update(crc, (const uint8_t*)data, n);
+    }
+};
+
+static bool metaValid(Controller& c, uint8_t track, uint8_t bank, uint8_t beat) {
+    const StepMeta& m = meta[track][bank][beat];
+    if (m.probability == 0) return false;
+    Bank& b = PluginAccess::layer(c, track).bankLibrary[bank];
+    return (beat <= b.lastActiveBeatNum) && b.beatLibrary[beat].getActive() && (b.beatLibrary[beat].getStartInterval() == m.tick);
+}
+
+static void saveBlock(FIL& file) {
+    ensureState();
+    Controller& c = controller;
+
+    // 1. COUNT RECORDS
+    uint16_t records = 0;
+    for (uint8_t t = 0; t < kGenTracks; t++)
+        for (uint8_t b = 0; b < kBankLibrarySize; b++)
+            for (uint8_t k = 0; k < kBeatLibrarySize; k++) records += metaValid(c, t, b, k);
+
+    // 2. HEADER + SETTINGS
+    BlockWriter w = {&file, 0, 0, true};
+    const GenParams& p = settings.params;
+    uint8_t header[12] = {kGenBlockVersion, p.style, p.density, p.variation, p.swing, p.humanize,
+                          p.dynamics, p.probability, p.ratchet, settings.fillChoice, evolveChoice, 0};
+    w.put(header, sizeof(header));
+    w.put(&p.seed, sizeof(p.seed));
+    w.put(settings.salt, sizeof(settings.salt));
+    uint16_t lockMask = 0;
+    for (uint8_t i = 0; i < kGenTracks; i++) lockMask |= locked[i] ? (1u << i) : 0;
+    w.put(&lockMask, sizeof(lockMask));
+    w.put(roleOverride, sizeof(roleOverride));
+    w.put(&records, sizeof(records));
+
+    // 3. RECORDS
+    for (uint8_t t = 0; t < kGenTracks; t++) {
+        for (uint8_t b = 0; b < kBankLibrarySize; b++) {
+            for (uint8_t k = 0; k < kBeatLibrarySize; k++) {
+                if (!metaValid(c, t, b, k)) continue;
+                const StepMeta& m = meta[t][b][k];
+                uint8_t record[7] = {t, b, k, m.probability, m.gain, (uint8_t)(m.tick & 0xFF), (uint8_t)(m.tick >> 8)};
+                w.put(record, sizeof(record));
+            }
+        }
+    }
+
+    // 4. TRAILER
+    uint32_t crc = w.crc, length = w.length;
+    UINT written = 0;
+    if (w.ok) {
+        f_write(&file, &crc, sizeof(crc), &written);
+        f_write(&file, &length, sizeof(length), &written);
+        f_write(&file, kGenBlockMagic, sizeof(kGenBlockMagic), &written);
+    }
+}
+
+static void loadBlock(FIL& file, const char* path, bool songLoaded) {
+    // 1. A NEWLY LOADED SONG STARTS WITHOUT GENERATED-STEP DATA
+    ensureState();
+    memset(meta, 0, sizeof(meta));
+    undoValid = false;
+    if (!songLoaded) return;
+    Controller& c = controller;
+
+    // 2. FIND THE TRAILER AT THE END OF THE FILE
+    if (f_open(&file, path, FA_READ) != FR_OK) return;
+    FSIZE_t size = f_size(&file);
+    uint32_t trailer[3] = {};
+    UINT bytesRead = 0;
+    bool found = (size > 12) && (f_lseek(&file, size - 12) == FR_OK) && (f_read(&file, trailer, 12, &bytesRead) == FR_OK) &&
+                 (bytesRead == 12) && (memcmp(&trailer[2], kGenBlockMagic, 4) == 0) && (trailer[1] <= kGenBlockMaxPayload) &&
+                 (trailer[1] + 12 <= size);
+    if (!found) {
+        f_close(&file);
+        return;
+    }
+    uint32_t crcExpected = trailer[0], length = trailer[1];
+
+    // 3. VERIFY CRC (first pass), THEN PARSE (second pass)
+    BlockReader r = {&file, 0, true};
+    f_lseek(&file, size - 12 - length);
+    uint8_t chunk[64];
+    for (uint32_t done = 0; r.ok && (done < length); done += sizeof(chunk)) {
+        r.get(chunk, (length - done < sizeof(chunk)) ? (uint16_t)(length - done) : (uint16_t)sizeof(chunk));
+    }
+    if (!r.ok || (r.crc != crcExpected)) {
+        f_close(&file);
+        pluginHost_message("FILE: GENERATOR DATA DAMAGED - BEATS LOADED WITHOUT PROBABILITY", true);
+        return;
+    }
+
+    r = {&file, 0, true};
+    f_lseek(&file, size - 12 - length);
+    uint8_t header[12];
+    r.get(header, sizeof(header));
+    if (header[0] != kGenBlockVersion) {
+        f_close(&file);
+        return;
+    }
+    GenSettings loaded = settings;
+    GenParams& p = loaded.params;
+    p.style = header[1] % STYLE_COUNT;
+    p.density = header[2];
+    p.variation = header[3];
+    p.swing = header[4];
+    p.humanize = header[5];
+    p.dynamics = header[6];
+    p.probability = header[7];
+    p.ratchet = header[8];
+    loaded.fillChoice = header[9] % sizeof(kGenFillChoices);
+    uint8_t evolveLoaded = header[10] % sizeof(kGenEvolveChoices);
+    r.get(&p.seed, sizeof(p.seed));
+    r.get(loaded.salt, sizeof(loaded.salt));
+    uint16_t lockMask = 0;
+    r.get(&lockMask, sizeof(lockMask));
+    int8_t roles[kGenTracks];
+    r.get(roles, sizeof(roles));
+    uint16_t records = 0;
+    r.get(&records, sizeof(records));
+    if (!r.ok) {
+        f_close(&file);
+        return;
+    }
+
+    settings = loaded;
+    evolveChoice = evolveLoaded;
+    for (uint8_t i = 0; i < kGenTracks; i++) {
+        locked[i] = lockMask & (1u << i);
+        roleOverride[i] = ((roles[i] >= -1) && (roles[i] < ROLE_COUNT)) ? roles[i] : -1;
+    }
+
+    // 4. RECORDS (applied only where the loaded beat matches)
+    for (uint16_t n = 0; r.ok && (n < records); n++) {
+        uint8_t record[7];
+        r.get(record, sizeof(record));
+        uint8_t t = record[0], b = record[1], k = record[2];
+        if (!r.ok || (t >= kGenTracks) || (b >= kBankLibrarySize) || (k >= kBeatLibrarySize)) continue;
+        meta[t][b][k] = {(uint16_t)(record[5] | (record[6] << 8)), record[3], record[4]};
+        if (!metaValid(c, t, b, k)) meta[t][b][k] = {0, 0, 0};
+    }
+    f_close(&file);
 }
 
 /* Open / Close -----------------------------------------------------*/
@@ -319,11 +634,7 @@ static void closePage() {
 /* Public -----------------------------------------------------------*/
 
 void generator_initialize() {
-    memset(meta, 0, sizeof(meta));  // DTCM is not zeroed at boot
-    for (uint8_t i = 0; i < kGenTracks; i++) {
-        roleOverride[i] = -1;
-        locked[i] = false;
-    }
+    ensureState();  // Keeps what a boot-time File load already restored
 }
 
 bool generator_isOpen() {
@@ -340,13 +651,27 @@ bool generator_keyPasses(uint8_t keypad, uint8_t key) {
 }
 
 bool generator_handleEvent(const PluginEvent& e, Controller& c) {
-    // 1. FILL HELD (tracked open or closed: FILL + STYLE toggles the page)
+    // 1. EVOLVE (open or closed): every N bars while playing
+    if (e.type == PLUGIN_EVENT_STEP) {
+        uint8_t every = kGenEvolveChoices[evolveChoice];
+        uint16_t step = e.a | (e.b << 8);
+        uint8_t stepsPerBar = PluginAccess::beatsPerBar(c) * 4;
+        if ((every != 0) && (stepsPerBar != 0) && (step % stepsPerBar == 0) && !PluginAccess::recording(c)) {
+            if (++evolveBarCount >= every) {
+                evolveBarCount = 0;
+                evolve(c);
+            }
+        }
+        return false;  // Steps still reach plugins
+    }
+
+    // 2. FILL HELD (tracked open or closed: FILL + STYLE toggles the page)
     if ((e.type == PLUGIN_EVENT_KEY) && (e.a == kKeypadLeft) && (e.b == KEY_FILL)) {
         fillHeld = e.c;
         return open;
     }
 
-    // 2. CLOSED: WATCH FOR FILL + STYLE
+    // 3. CLOSED: WATCH FOR FILL + STYLE
     if (!open) {
         if ((e.type == PLUGIN_EVENT_KEY) && e.c && (e.a == kKeypadLeft) && (e.b == KEY_STYLE) && fillHeld && !manager_isOpen()) {
             if (PluginAccess::recording(c)) {
@@ -359,7 +684,8 @@ bool generator_handleEvent(const PluginEvent& e, Controller& c) {
         return false;
     }
 
-    // 3. OPEN: KNOBS = PARAMETERS
+    // 4. OPEN: KNOBS = PARAMETERS
+    GenParams& p = settings.params;
     if (e.type == PLUGIN_EVENT_ENCODER) {
         int8_t d = (int8_t)e.b;
         auto step = [d](uint8_t& v, int16_t perClick, int16_t lo, int16_t hi) {
@@ -367,25 +693,23 @@ bool generator_handleEvent(const PluginEvent& e, Controller& c) {
             v = (uint8_t)((n < lo) ? lo : (n > hi) ? hi : n);
         };
         switch (e.a) {
-            case KNOB_STYLE:
-                params.style = (uint8_t)((params.style + STYLE_COUNT + d) % STYLE_COUNT);
-                break;
-            case KNOB_DENSITY: step(params.density, 5, 0, 100); break;
-            case KNOB_VARIATION: step(params.variation, 5, 0, 100); break;
-            case KNOB_SWING: step(params.swing, 1, 50, 75); break;
-            case KNOB_HUMANIZE: step(params.humanize, 5, 0, 100); break;
-            case KNOB_DYNAMICS: step(params.dynamics, 5, 0, 100); break;
-            case KNOB_PROBABILITY: step(params.probability, 5, 0, 100); break;
-            case KNOB_RATCHET: step(params.ratchet, 5, 0, 100); break;
+            case KNOB_STYLE: p.style = (uint8_t)((p.style + STYLE_COUNT + d) % STYLE_COUNT); break;
+            case KNOB_DENSITY: step(p.density, 5, 0, 100); break;
+            case KNOB_VARIATION: step(p.variation, 5, 0, 100); break;
+            case KNOB_SWING: step(p.swing, 1, 50, 75); break;
+            case KNOB_HUMANIZE: step(p.humanize, 5, 0, 100); break;
+            case KNOB_DYNAMICS: step(p.dynamics, 5, 0, 100); break;
+            case KNOB_PROBABILITY: step(p.probability, 5, 0, 100); break;
+            case KNOB_RATCHET: step(p.ratchet, 5, 0, 100); break;
             default: break;
         }
         dirty = true;
         return true;
     }
-    if (e.type != PLUGIN_EVENT_KEY) return false;  // Steps, notes, MIDI still reach plugins
+    if (e.type != PLUGIN_EVENT_KEY) return false;  // Notes and MIDI still reach plugins
     if (!e.c) return true;                          // Releases (stock gets them anyway)
 
-    // 4. OPEN: KEYS
+    // 5. OPEN: KEYS (printed names in comments where they differ)
     if (e.a == kKeypadLayer) {
         if (e.b < kGenTracks) selected = e.b;  // Layer key selects that track
     } else if (e.a == kKeypadRight) {
@@ -394,16 +718,19 @@ bool generator_handleEvent(const PluginEvent& e, Controller& c) {
         switch (e.b) {
             case KEY_UP: selected = (selected + kGenTracks - 1) % kGenTracks; break;
             case KEY_DOWN: selected = (selected + 1) % kGenTracks; break;
-            case KEY_ADD: locked[selected] = !locked[selected]; break;  // Printed "SELECT"
-            case KEY_COPY:
-                // AUTO -> each role -> AUTO
-                roleOverride[selected] = (roleOverride[selected] + 2 > ROLE_COUNT) ? -1 : roleOverride[selected] + 1;
-                break;
-            case KEY_CENTER: generate(c, false); break;  // Printed "GLOBAL"
-            case KEY_PASTE: generate(c, true); break;
+            case KEY_ADD: locked[selected] = !locked[selected]; break;  // SELECT
+            case KEY_COPY: roleOverride[selected] = (roleOverride[selected] + 2 > ROLE_COUNT) ? -1 : roleOverride[selected] + 1; break;
+            case KEY_CENTER: generateAll(c, false); break;  // GLOBAL
+            case KEY_PASTE: generateAll(c, true); break;
+            case KEY_MUTE: rerollSelected(c); break;
             case KEY_CLEAR: undo(c); break;
-            case KEY_LEFT: fillChoice = (fillChoice + sizeof(kGenFillChoices) - 1) % sizeof(kGenFillChoices); break;
-            case KEY_RIGHT: fillChoice = (fillChoice + 1) % sizeof(kGenFillChoices); break;
+            case KEY_LEFT: historyGo(c, -1); break;
+            case KEY_RIGHT: historyGo(c, +1); break;
+            case KEY_SONG: settings.fillChoice = (settings.fillChoice + 1) % sizeof(kGenFillChoices); break;
+            case KEY_REC:
+                evolveChoice = (evolveChoice + 1) % sizeof(kGenEvolveChoices);
+                evolveBarCount = 0;
+                break;
             case KEY_STYLE:
                 if (fillHeld) closePage();  // FILL + STYLE again
                 break;
@@ -433,7 +760,7 @@ void generator_frame(Controller& c) {
     }
 }
 
-/* Beat Hooks (called from stock code) ------------------------------*/
+/* Hooks Called From Stock Code -------------------------------------*/
 
 void pluginHost_beatGate(uint8_t layer, uint8_t bank, uint8_t beatNum, uint16_t startInterval, float& volume) {
     /// @brief Play-timer interrupt: per-step probability roll and velocity for generated beats.
@@ -442,14 +769,9 @@ void pluginHost_beatGate(uint8_t layer, uint8_t bank, uint8_t beatNum, uint16_t 
     const StepMeta& m = meta[layer][bank][beatNum];
     if ((m.probability == 0) || (m.tick != startInterval)) return;  // Not generated, or edited by hand
 
-    if (m.probability < 100) {
-        gateRandom ^= gateRandom << 13;
-        gateRandom ^= gateRandom >> 17;
-        gateRandom ^= gateRandom << 5;
-        if ((gateRandom % 100u) >= m.probability) {
-            volume = 0.0f;
-            return;
-        }
+    if ((m.probability < 100) && ((nextRandom(gateRandom) % 100u) >= m.probability)) {
+        volume = 0.0f;
+        return;
     }
     volume *= m.gain * 0.01f;
 }
@@ -461,6 +783,14 @@ void pluginHost_beatColor(Lcd& lcd, uint8_t layer, uint8_t bank, uint8_t beatNum
     const StepMeta& m = meta[layer][bank][beatNum];
     if ((m.probability == 0) || (m.tick != startInterval) || (m.probability >= 95)) return;
     lcd.setForeColor((m.probability >= 70) ? GREEN : (m.probability >= 45) ? YELLOW : (m.probability >= 20) ? ORANGE : RED);
+}
+
+void pluginHost_fileSaved(FIL& file) {
+    saveBlock(file);
+}
+
+void pluginHost_fileLoaded(FIL& file, const char* path, bool songLoaded) {
+    loadBlock(file, path, songLoaded);
 }
 
 #endif
