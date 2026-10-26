@@ -46,7 +46,7 @@ bool pluginHost_isCapturing();
 bool pluginHost_isScreenCaptured();
 bool pluginHost_keyPassesThrough(uint8_t keypad, uint8_t key);
 void pluginHost_audioTap(const uint32_t* interleaved, uint16_t frames);
-void pluginHost_beatGate(uint8_t layer, uint8_t bank, uint8_t beatNum, uint16_t startInterval, float& volume);
+void pluginHost_beatGate(uint8_t layer, uint8_t bank, uint8_t beatNum, uint16_t startInterval, int8_t micro, float& volume);
 void pluginHost_beatColor(Lcd& lcd, uint8_t layer, uint8_t bank, uint8_t beatNum, uint16_t startInterval);
 void pluginHost_fileSaved(FIL& file);
 void pluginHost_fileLoaded(FIL& file, const char* path, bool songLoaded);
@@ -63,8 +63,9 @@ void pluginHost_fileLoaded(FIL& file, const char* path, bool songLoaded);
 #define PLUGIN_KEY_PASSES(keypad_, key_)            pluginHost_keyPassesThrough((keypad_), (key_))
 // Output level/bass/treble peaks for visual plugins; called in the I2S interrupt after each block (~200 flops).
 #define PLUGIN_AUDIO_TAP(buffer_, frames_)          pluginHost_audioTap((buffer_), (frames_))
-// Generated steps: per-step probability roll and velocity, just before a beat plays (play-timer interrupt).
-#define PLUGIN_BEAT_GATE(layer_, bank_, beat_, start_, volume_) pluginHost_beatGate((layer_), (bank_), (beat_), (start_), (volume_))
+// Per-step condition, probability and velocity, just before a beat plays (play-timer interrupt).
+// micro: 0 = the beat's first hit, > 0 = a fill/ratchet repeat of the same beat (decided once per beat).
+#define PLUGIN_BEAT_GATE(layer_, bank_, beat_, start_, micro_, volume_) pluginHost_beatGate((layer_), (bank_), (beat_), (start_), (micro_), (volume_))
 // Generated steps: beat tick colour by probability (lcd_drawBeat, non-selected beats).
 #define PLUGIN_BEAT_COLOR(lcd_, layer_, bank_, beat_, start_)   pluginHost_beatColor((lcd_), (layer_), (bank_), (beat_), (start_))
 // Files: append / read the cyberyak extension block (generator data) after the stock EOF marker.
@@ -81,7 +82,7 @@ void pluginHost_fileLoaded(FIL& file, const char* path, bool songLoaded);
 #define PLUGIN_SCREEN_CAPTURED()                    (false)
 #define PLUGIN_KEY_PASSES(keypad_, key_)            (true)
 #define PLUGIN_AUDIO_TAP(buffer_, frames_)          ((void)0)
-#define PLUGIN_BEAT_GATE(layer_, bank_, beat_, start_, volume_) ((void)0)
+#define PLUGIN_BEAT_GATE(layer_, bank_, beat_, start_, micro_, volume_) ((void)0)
 #define PLUGIN_BEAT_COLOR(lcd_, layer_, bank_, beat_, start_)   ((void)0)
 #define PLUGIN_FILE_SAVE(file_)                     ((void)0)
 #define PLUGIN_FILE_LOADED(file_, path_, ok_)       ((void)0)

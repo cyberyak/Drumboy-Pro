@@ -9,7 +9,7 @@ What it adds:
 | Plugin host (hooks, event queue, frames) | always on; plugins switched on in `Plugins/plugins.txt` | [Plugin development guide](../02%20Software/Drumboy-Pro-App-H723/Core/Plugin/README.md) |
 | Plugin & Firmware Manager | File menu → press **FILE** again | [Manager.md](../02%20Software/Drumboy-Pro-App-H723/Core/Plugin/Manager.md) |
 | Show mode (a plugin owns the track area) | Manager → select plugin → **SELECT** | [Manager.md](../02%20Software/Drumboy-Pro-App-H723/Core/Plugin/Manager.md#show-mode) |
-| Pattern generator | hold **FILL** + press **STYLE** | [Generator.md](../02%20Software/Drumboy-Pro-App-H723/Core/Plugin/Generator.md) |
+| Pattern generator (GEN, GRIDS X/Y map, EUCLID, STEP conditions) | hold **FILL** + press **STYLE**; **STYLE** = next page | [Generator.md](../02%20Software/Drumboy-Pro-App-H723/Core/Plugin/Generator.md) |
 | CPU Meter plugin | `cpu_meter = on` | [CpuMeter.md](../02%20Software/Drumboy-Pro-App-H723/Core/Plugin/CpuMeter.md) |
 | Hook Monitor plugin | `hook_monitor = on` | [HookMonitor.md](../02%20Software/Drumboy-Pro-App-H723/Core/Plugin/HookMonitor.md) |
 | Psychedelic visualizer | `psychedelic = on`, then show mode | [Psychedelic.md](../02%20Software/Drumboy-Pro-App-H723/Core/Plugin/Psychedelic.md) |

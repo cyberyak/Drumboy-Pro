@@ -10,6 +10,22 @@ Custom Drumboy Pro firmware by cyberyak (fork of [Randomwaves/Drumboy-Pro](https
 
 ## [Unreleased]
 
+## [1.01-cy.8]
+
+OXI-style drum features, part 1: generator pages, Grids-style map, Euclidean tracks, trig conditions.
+
+### Added
+- **Generator pages**: press **STYLE** in the generator to cycle GEN → GRIDS → EUCLID → STEP (FILL + STYLE still closes). The bottom line shows each page's keys.
+- **GRIDS page**: kick, snare and hat tracks from a 3×3 map of patterns (own data), morphed by **X** (minimal → busy) and **Y** (straight → electro → broken). Knobs: X, Y, KICK / SNARE / HATS density, CHAOS, SWING, DYNAMICS. CHAOS varies the weaker hits per bar and gives borderline hits a probability, so the groove keeps changing from loop to loop; strong hits stay. Turning a knob updates GRIDS tracks live. GLOBAL generates, PASTE new seed, MUTE re-roll, LEFT/RIGHT history. Other roles keep the GEN engine.
+- **EUCLID page**: per track E(pulses, steps) with rotation, rate (1/32, 1/16T, 1/16, 1/8T, 1/8, 1/4), velocity, evenly spread accents and probability for unaccented hits. Edits are live; the track is locked so GEN / GRIDS keep it. LEFT/RIGHT rotate, PASTE random, MUTE releases the track.
+- **STEP page**: LEFT/RIGHT select a beat of the selected track (shown white in its lane); knob 1 **trig condition**, knob 2 probability, knob 3 level. Works on hand-made beats too. GLOBAL resets the step.
+- **Trig conditions** (OXI / Elektron style): A:B (play on loop A of every B, B = 2–8), FILL / NOT FILL (FILL key held), FIRST / NOT FIRST (first loop after PLAY or RESET), PRE / NOT PRE (previous condition on the track). Conditional beats are drawn magenta.
+- Each track remembers which engine made it (GEN, GRIDS, EUCLID); re-roll, history and EVOLVE use that engine. Undo also restores sources, locks and Euclid settings.
+
+### Changed
+- File extension block version 2 (GRIDS settings, track sources, Euclid settings, conditions). Version-1 Files still load.
+- `PLUGIN_BEAT_GATE` gets the fill/ratchet repeat index: conditions and probability are decided once per beat, so ratchet repeats no longer drop out individually.
+
 ## [1.01-cy.7]
 
 Generator: saving, single-track re-roll, history, EVOLVE.

@@ -23451,7 +23451,7 @@ void Controller::interruptPlay() {
                                         break;  // MUTED: 0% velocity
                                 }
                             }
-                            PLUGIN_BEAT_GATE(layer.number, activeSongBank, playBeatNum, beat.getStartInterval(), fillVolMultiplier);
+                            PLUGIN_BEAT_GATE(layer.number, activeSongBank, playBeatNum, beat.getStartInterval(), 0, fillVolMultiplier);
                             if (fillVolMultiplier > 0.0f) layer_playBeat(layer.number, fillVolMultiplier);
 
                             // Advance to the next beat index
@@ -23468,7 +23468,7 @@ void Controller::interruptPlay() {
                         if (beatMicro.getInterval() == playInterval) {
                             if ((!layer.mute) && (layer.samplePlay) && ((playBeatMicroNum == 0) || ((playBeatMicroNum != 0) && (layer.fill)))) {
                                 fillVolMultiplier = kNumberDataLibrary[beatMicro.getLevel()].powMultiplier;
-                                PLUGIN_BEAT_GATE(layer.number, activeSongBank, playBeatNum, beat.getStartInterval(), fillVolMultiplier);
+                                PLUGIN_BEAT_GATE(layer.number, activeSongBank, playBeatNum, beat.getStartInterval(), playBeatMicroNum, fillVolMultiplier);
                                 if (fillVolMultiplier > 0.0f) layer_playBeat(layer.number, fillVolMultiplier);
                             }
 

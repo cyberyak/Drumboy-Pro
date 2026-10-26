@@ -1,10 +1,23 @@
 # Pattern generator
 
-Source: `Generator.cpp/.h` (device page, writing beats, file block) and `PatternGen.cpp/.h` (engine). Part of the firmware — always available, not listed in `plugins.txt`. Since 1.01-cy.6 (saving, history, EVOLVE since cy.7).
+Source: `Generator.cpp/.h` (device page, writing beats, file block) and `PatternGen.cpp/.h` (engine). Part of the firmware — always available, not listed in `plugins.txt`. Since 1.01-cy.6 (saving, history, EVOLVE since cy.7; GRIDS, EUCLID, STEP pages and trig conditions since cy.8).
 
 ## Using it
 
 Hold **FILL** and press **STYLE** (from any menu). The parameters appear in the top strip; the song lanes stay visible and update as you generate. PLAY/STOP and RESET keep working.
+
+The generator has four pages; **STYLE** (alone) goes to the next one, **FILL + STYLE** or **FILE** closes:
+
+| Page | What it does |
+|---|---|
+| **GEN** | Style-based generator for all tracks (below) |
+| **GRIDS** | Kick / snare / hats from an X/Y map, live ([GRIDS page](#grids-page)) |
+| **EUCLID** | Euclidean rhythm for the selected track, live ([EUCLID page](#euclid-page)) |
+| **STEP** | Trig condition, probability and level per beat ([STEP page](#step-page-and-trig-conditions)) |
+
+On every page: **UP/DOWN** or a layer key selects a track, **SELECT** locks it, **COPY** changes its role, **CLEAR** undoes, **SONG** sets the phrase fill, **REC** sets EVOLVE. The bottom line shows the selected track (number, role, AUTO/SET, which engine made it, LOCK) and the page's keys.
+
+### GEN page
 
 Generating overwrites the **current song bank in memory**. Nothing touches the SD card until **File → SAVE**; to get the old pattern back, press **CLEAR** (undo) or reload the File.
 
@@ -32,7 +45,60 @@ Generating overwrites the **current song bank in memory**. Nothing touches the S
 
 **Tick colours** show probability: track colour = always plays, green ≥ 70%, yellow ≥ 45%, orange ≥ 20%, red below.
 
-**EVOLVE**: while playing, every 4 or 8 bars two unlocked tracks re-roll their per-bar details (ghosts, ratchets, extra hits) — the base groove stays. It keeps running with the page closed.
+**EVOLVE**: while playing, every 4 or 8 bars two unlocked GEN or GRIDS tracks re-roll their per-bar details (ghosts, ratchets, extra hits) — the base groove stays. It keeps running with the page closed.
+
+### GRIDS page
+
+Kick, snare and hat tracks from a map of drum patterns — the idea of Mutable Instruments' *Grids* and the OXI One drum generator, with our own pattern data (Grids' data is GPL and isn't used).
+
+| Knob | Controls |
+|---|---|
+| 1 X | Complexity: minimal → standard → busy |
+| 2 Y | Feel: straight (four-on-the-floor) → electro / funk → broken (half-time, breaks) |
+| 3 KICK, 4 SNARE, 5 HATS | Density of each part |
+| 6 CHAOS | Weaker hits vary per bar and become "maybe" hits, so every loop differs; strong hits (the backbone) stay |
+| 7 SWING, 8 DYN | Shared with the GEN page |
+
+Keys: **GLOBAL** generates the unlocked kick / snare / hat tracks from the map (they become GRIDS tracks), **PASTE** new seed, **MUTE** re-rolls the selected track, **LEFT/RIGHT** history. Once tracks are GRIDS tracks, turning a knob updates them **live**.
+
+Roles that follow the map: KICK → kick line; SNARE, CLAP, RIM → snare line (rim sparser); HAT-C, RIDE, SHAKER → hat line (ride and shaker sparser); HAT-O → hat line on off-beats only. Other roles keep their GEN pattern.
+
+### EUCLID page
+
+The selected track plays E(pulses, steps): the pulses spread as evenly as possible over the steps, repeated from the song start and cut at the song end.
+
+| Knob | Controls |
+|---|---|
+| 1 STEPS | 1–32 |
+| 2 PULSES | 0–steps |
+| 3 ROTATE | Shift the pattern |
+| 4 RATE | 1/32, 1/16T, 1/16, 1/8T, 1/8, 1/4 |
+| 5 VELO | Velocity of (accented) hits |
+| 6 ACCENTS | How many hits are accented (spread evenly); the others play at 60% |
+| 7 PROB | Probability of the unaccented hits |
+
+Turning a knob writes the track **live** and makes it a EUCLID track, **locked** so GEN and GRIDS leave it alone. **LEFT/RIGHT** rotate, **PASTE** random pulses / rotation / accents, **GLOBAL** writes it again, **MUTE** releases the track (beats kept, unlocked, back to GEN). A pattern needing more than 64 hits (e.g. 1/32 over 4 bars) is cut at the stock limit and the page says so.
+
+### STEP page and trig conditions
+
+**LEFT/RIGHT** select a beat of the selected track; it is drawn **white** in its lane and the top line shows its position. Works on generated and hand-made beats.
+
+| Knob | Controls |
+|---|---|
+| 1 COND | Trig condition (below) |
+| 2 PROB | Probability 5–100% |
+| 3 LEVEL | Volume 10–250% |
+
+**GLOBAL** resets the step (no condition, 100%, recorded level).
+
+| Condition | Plays when |
+|---|---|
+| `A:B` (1:2 … 8:8) | On loop A of every B loops — e.g. 1:2 every other loop, 4:4 every fourth loop |
+| `FILL` / `NOT FILL` | While the **FILL** key is held / not held |
+| `FIRST` / `NOT FIRST` | Only on / never on the first loop after PLAY or RESET |
+| `PRE` / `NOT PRE` | The previous conditional beat on this track played / didn't |
+
+Loops are counted per track from PLAY or RESET. A conditional beat is drawn **magenta**. The condition is checked first, then the probability.
 
 ## Track roles
 
@@ -82,7 +148,11 @@ Ticks: 800 per quarter note, 200 per 16th.
 
 Probability and exact velocity don't fit the stock beat format, so they are kept in a side table `StepMeta { tick, probability, gain }` per track × bank × beat (in DTCM). `PLUGIN_BEAT_GATE` looks it up just before a beat plays: it rolls the probability and multiplies the volume by `gain`. An entry only applies while the beat still starts at the stored tick, so beats edited by hand afterwards play normally.
 
-Undo keeps one copy of every track's bank and its meta (`undoBanks`, in DTCM). History keeps the last 8 settings + seeds + salts (not the beats) and regenerates.
+Undo keeps one copy of every track's bank and its meta (`undoBanks`, in DTCM), plus track sources, locks and Euclid settings. History keeps the last 8 settings + seeds + salts + track sources (not the beats) and regenerates; Euclid tracks are left out.
+
+**Track source**: each track remembers which engine made it (`SOURCE_GEN`, `SOURCE_GRIDS`, `SOURCE_EUCLID`); re-roll, history, EVOLVE and live edits regenerate it with that engine (`regenerate()`).
+
+**Gate decisions**: `PLUGIN_BEAT_GATE` passes the fill/ratchet repeat index. On the first hit (`micro` 0) the gate counts loops (a beat starting no later than the previous one means the track wrapped), checks the condition, rolls the probability and stores the decision; repeats of the same beat follow it.
 
 ## File format (CYBX block)
 
@@ -93,19 +163,22 @@ File → SAVE appends this after the stock `EOF` marker (`PLUGIN_FILE_SAVE`):
                          \______ 12-byte trailer at the very end of the file ______/
 ```
 
-Payload (version 1, little-endian):
+Payload (version 2, little-endian; version 1 lacks the marked fields and has 7-byte records):
 
 | Bytes | Field |
 |---|---|
-| 12 | header: version (1), style, density, variation, swing, humanize, dynamics, probability, ratchet, fill choice, evolve choice, reserved |
+| 12 | header: version (2), style, density, variation, swing, humanize, dynamics, probability, ratchet, fill choice, evolve choice, reserved |
 | 4 | seed |
 | 4 × 10 | per-track re-roll salts |
 | 2 | lock mask (bit per track) |
 | 1 × 10 | role overrides (`int8`, −1 = AUTO) |
+| 6 | **v2**: GRIDS x, y, kick / snare / hats density, chaos |
+| 1 × 10 | **v2**: track sources (0 GEN, 1 GRIDS, 2 EUCLID) |
+| 7 × 10 | **v2**: Euclid per track: steps, pulses, rotate, rate, velocity, accents, probability |
 | 2 | record count |
-| 7 × count | records: track, bank, beat, probability, gain ×100, tick (u16) |
+| 8 × count | records: track, bank, beat, probability, gain ×100, tick (u16), condition (**v2**) |
 
-Only beats that are still valid generated beats are written.
+Only beats with valid meta are written (generated beats and beats edited on the STEP page). A block from a newer firmware version is skipped with a message.
 
 Loading (`PLUGIN_FILE_LOADED`): the meta table is cleared, then the trailer is looked for in the last 12 bytes. If the magic matches and the length is sane (≤ 32 KB), the CRC is checked over the payload first and only then parsed. A CRC mismatch shows `FILE: GENERATOR DATA DAMAGED - BEATS LOADED WITHOUT PROBABILITY` and the beats load as plain beats. An unknown version is ignored.
 
@@ -113,4 +186,4 @@ Compatibility: stock firmware reads its fixed sections up to `EOF` and never loo
 
 ## Status
 
-Built and host-tested; device testing pending (Jira DRUMB-18, 19, 20). Back up the SD card before testing saves (DRUMB-21). Ideas: more styles (DRUMB-22), per-track density (DRUMB-23).
+Built and host-tested; device testing pending (Jira DRUMB-18, 19, 20; cy.8: DRUMB-40, 41, 42). Ideas: more styles (DRUMB-22), per-track density (DRUMB-23), more OXI-style features (epic DRUMB-39).
