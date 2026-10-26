@@ -1,0 +1,25 @@
+# Plugin manager: open with FILE, FILE; switch CPU_METER on with GLOBAL; close saves plugins.txt.
+# (Left-keypad keys reach plugins only with 1-byte enums, as on the device.)
+
+wait-ready 30000
+wait-stable 300
+press FILE
+wait-menu FILE 2000
+wait 300
+press FILE
+wait 500
+expect manager == 1
+expect plugin.cpu_meter == off,off
+press CENTER
+wait 200
+expect plugin.cpu_meter == off,on
+press DOWN
+press DOWN
+press CENTER
+wait 200
+expect plugin.psychedelic == off,on
+screenshot manager.png
+press FILE
+wait 800
+expect manager == 0
+screenshot saved.png

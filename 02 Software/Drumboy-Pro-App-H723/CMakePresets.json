@@ -25,11 +25,25 @@
             "displayName": "Release (-Os, smaller, slower DSP)",
             "inherits": "base",
             "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+        },
+        {
+            "name": "Simulator",
+            "displayName": "Simulator (macOS desktop build, x86_64 via Rosetta)",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "DRUMBOY_SIMULATOR": "ON",
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_OSX_ARCHITECTURES": "x86_64",
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++"
+            }
         }
     ],
     "buildPresets": [
         { "name": "Debug", "configurePreset": "Debug" },
         { "name": "Stock", "configurePreset": "Stock" },
-        { "name": "Release", "configurePreset": "Release" }
+        { "name": "Release", "configurePreset": "Release" },
+        { "name": "Simulator", "configurePreset": "Simulator" }
     ]
 }

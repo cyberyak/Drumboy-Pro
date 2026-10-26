@@ -180,6 +180,15 @@ SECTIONS
     . = ALIGN(4);
   } >RAM_D3
 
+  /* CPU-only memory (no DMA access), not zero-initialized: fast plugin tables */
+  .DTCMRAM (NOLOAD) :
+  {
+    . = ALIGN(8);
+    *(.DTCMRAM)
+    *(.DTCMRAM*)
+    . = ALIGN(8);
+  } >DTCMRAM
+
   /DISCARD/ :
   {
     libc.a ( * )
