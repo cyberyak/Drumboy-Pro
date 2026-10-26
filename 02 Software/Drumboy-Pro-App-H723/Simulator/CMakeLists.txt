@@ -5,6 +5,7 @@
 #   - CMSIS core header (Simulator/hal/core_cm7.h): intrinsics -> sim runtime
 #   - HAL driver sources (src/sim_hal.cpp)
 #   - SD card driver (src/sim_diskio.cpp): FatFs on a card image
+#   - Lcd.cpp: compiled from a generated copy (cmake/lcd_source.cmake)
 #
 # Built for x86_64 and run with Rosetta on Apple silicon: the firmware keeps
 # MCU addresses (SDRAM 0xC0000000, RAM_D3 0x38000000, registers) in uint32_t,
@@ -25,7 +26,19 @@ file(GLOB_RECURSE SIM_FIRMWARE_SOURCES CONFIGURE_DEPENDS
     ${FW_DIR}/Core/Plugin/*.cpp
     ${FW_DIR}/Middlewares/Third_Party/FatFs/src/*.c
 )
+# Lcd.cpp is compiled from a generated copy (cmake/lcd_source.cmake)
+set(LCD_SOURCE ${FW_DIR}/Core/Library/Lcd/Lcd.cpp)
+set(LCD_GENERATED ${CMAKE_CURRENT_BINARY_DIR}/generated/Lcd.cpp)
+list(REMOVE_ITEM SIM_FIRMWARE_SOURCES ${LCD_SOURCE})
+add_custom_command(
+    OUTPUT ${LCD_GENERATED}
+    COMMAND ${CMAKE_COMMAND} -DIN=${LCD_SOURCE} -DOUT=${LCD_GENERATED} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/lcd_source.cmake
+    DEPENDS ${LCD_SOURCE} ${CMAKE_CURRENT_SOURCE_DIR}/cmake/lcd_source.cmake
+    COMMENT "Generating simulator copy of Lcd.cpp"
+)
+
 list(APPEND SIM_FIRMWARE_SOURCES
+    ${LCD_GENERATED}
     ${FW_DIR}/Core/Src/main.cpp
     ${FW_DIR}/Core/Src/bdma.c
     ${FW_DIR}/Core/Src/dma.c
@@ -41,11 +54,18 @@ list(APPEND SIM_FIRMWARE_SOURCES
 )
 
 set(SIM_SOURCES
+    src/sim_audio.cpp
+    src/sim_control.cpp
     src/sim_cpu.cpp
     src/sim_diskio.cpp
+    src/sim_gpio.cpp
     src/sim_hal.cpp
+    src/sim_lcd.cpp
+    src/sim_libc.cpp
     src/sim_main.cpp
     src/sim_memory.cpp
+    src/sim_panel.cpp
+    src/sim_timers.cpp
 )
 
 add_executable(DrumboySim ${SIM_FIRMWARE_SOURCES} ${SIM_SOURCES})
@@ -83,7 +103,17 @@ target_compile_options(DrumboySim PRIVATE
     -fno-strict-aliasing                        # register/buffer type punning as on the MCU
     -Wno-unused-parameter -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable
 )
-set_source_files_properties(${SIM_FIRMWARE_SOURCES} PROPERTIES COMPILE_OPTIONS "-w")
+# Firmware sources: no warnings, and no stack protector by default, like the
+# device. DRUMBOY_SIM_STACK_CHECK=ON turns it on to catch stack buffer
+# overflows (the simulator then stops with a backtrace).
+option(DRUMBOY_SIM_STACK_CHECK "Build firmware sources with -fstack-protector-all" OFF)
+if(DRUMBOY_SIM_STACK_CHECK)
+    set(SIM_FIRMWARE_FLAGS "-w;-fstack-protector-all")
+else()
+    set(SIM_FIRMWARE_FLAGS "-w;-fno-stack-protector")
+endif()
+set_source_files_properties(${SIM_FIRMWARE_SOURCES} PROPERTIES COMPILE_OPTIONS "${SIM_FIRMWARE_FLAGS}")
 set_source_files_properties(${FW_DIR}/Core/Src/main.cpp PROPERTIES COMPILE_DEFINITIONS "main=firmware_main")
 
 target_link_options(DrumboySim PRIVATE -Wl,-pagezero_size,0x1000)
+target_link_libraries(DrumboySim PRIVATE z)

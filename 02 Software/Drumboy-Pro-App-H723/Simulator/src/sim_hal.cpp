@@ -6,10 +6,8 @@
 // configuration into the (memory-mapped) registers like the real HAL, so the
 // simulated peripherals read timer periods etc. from the same place.
 
-#include <array>
 #include <chrono>
 #include <cstring>
-#include <map>
 #include <thread>
 
 #include "main.h"
@@ -31,8 +29,8 @@ HAL_StatusTypeDef HAL_Init(void) {
 uint32_t HAL_GetTick(void) { return static_cast<uint32_t>(sim::nowUs() / 1000); }
 
 void HAL_Delay(uint32_t Delay) {
-    // Same minimum wait as the HAL (one extra tick)
-    std::this_thread::sleep_for(std::chrono::milliseconds(Delay + 1));
+    // Same minimum wait as the HAL (one extra tick), scaled by --delay-scale
+    std::this_thread::sleep_for(std::chrono::microseconds(static_cast<uint64_t>((Delay + 1) * 1000.0 * sim::options.delayScale)));
 }
 
 void HAL_SYSCFG_AnalogSwitchConfig(uint32_t SYSCFG_AnalogSwitch, uint32_t SYSCFG_SwitchState) {}
@@ -104,14 +102,8 @@ HAL_StatusTypeDef HAL_TIM_Base_Stop_IT(TIM_HandleTypeDef* htim) {
 
 /* I2C ----------------------------------------------------------- */
 
-// Every device on the buses is a 256-byte register file for now; the keypad
-// and LED expanders (MCP23017) get their behaviour in the front panel model.
-static std::map<uint32_t, std::array<uint8_t, 256>> i2cDevices;
-
-static uint8_t* i2cRegisters(I2C_HandleTypeDef* hi2c, uint16_t DevAddress) {
-    uint32_t key = (hi2c->Instance == I2C3 ? 0x300 : 0x400) | (DevAddress & 0xFF);
-    return i2cDevices[key].data();
-}
+// Devices on both buses live in the front panel model (sim_panel.cpp)
+static bool isBus4(const I2C_HandleTypeDef* hi2c) { return hi2c->Instance == I2C4; }
 
 HAL_StatusTypeDef HAL_I2C_Init(I2C_HandleTypeDef* hi2c) {
     HAL_I2C_MspInit(hi2c);
@@ -128,15 +120,13 @@ HAL_StatusTypeDef HAL_I2C_IsDeviceReady(I2C_HandleTypeDef* hi2c, uint16_t DevAdd
 
 HAL_StatusTypeDef HAL_I2C_Mem_Write(I2C_HandleTypeDef* hi2c, uint16_t DevAddress, uint16_t MemAddress, uint16_t MemAddSize, uint8_t* pData,
                                     uint16_t Size, uint32_t Timeout) {
-    uint8_t* regs = i2cRegisters(hi2c, DevAddress);
-    for (uint16_t i = 0; i < Size; i++) regs[(MemAddress + i) & 0xFF] = pData[i];
+    sim::panelI2cWrite(isBus4(hi2c), static_cast<uint8_t>(DevAddress), static_cast<uint8_t>(MemAddress), pData, Size);
     return HAL_OK;
 }
 
 HAL_StatusTypeDef HAL_I2C_Mem_Read(I2C_HandleTypeDef* hi2c, uint16_t DevAddress, uint16_t MemAddress, uint16_t MemAddSize, uint8_t* pData,
                                    uint16_t Size, uint32_t Timeout) {
-    uint8_t* regs = i2cRegisters(hi2c, DevAddress);
-    for (uint16_t i = 0; i < Size; i++) pData[i] = regs[(MemAddress + i) & 0xFF];
+    sim::panelI2cRead(isBus4(hi2c), static_cast<uint8_t>(DevAddress), static_cast<uint8_t>(MemAddress), pData, Size);
     return HAL_OK;
 }
 
@@ -155,7 +145,7 @@ HAL_StatusTypeDef HAL_I2C_Mem_Read_DMA(I2C_HandleTypeDef* hi2c, uint16_t DevAddr
     return HAL_OK;
 }
 
-// Plain transfers: register address in the first byte (SGTL5000 uses 16-bit addresses)
+// Codec (SGTL5000) register access: accepted, reads return 0
 HAL_StatusTypeDef HAL_I2C_Master_Transmit(I2C_HandleTypeDef* hi2c, uint16_t DevAddress, uint8_t* pData, uint16_t Size, uint32_t Timeout) {
     return HAL_OK;
 }
@@ -179,6 +169,7 @@ HAL_StatusTypeDef HAL_I2SEx_TransmitReceive_DMA(I2S_HandleTypeDef* hi2s, const u
     hi2s->TxXferSize = Size;
     hi2s->RxXferSize = Size;
     hi2s->State = HAL_I2S_STATE_BUSY_TX_RX;
+    sim::audioStart();
     return HAL_OK;
 }
 
