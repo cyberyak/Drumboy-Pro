@@ -3,4 +3,5 @@
 # Plugins not listed here, or if this file is missing, stay off.
 
 cpu_meter = off        # Audio and main-loop CPU load (green line, top-left)
-hook_monitor = off     # Developer tool: latest step/note/key/encoder/MIDI events (cyan line)
+hook_monitor = off     # Developer view of step/note/key/encoder/MIDI events (cyan line)
+psychedelic = off      # Full-screen evolving psychedelic visuals (show mode: manager -> SELECT)

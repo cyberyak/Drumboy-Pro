@@ -368,7 +368,7 @@ void Controller::update() {
         led_action();
 
         // Push buffered graphical changes to the LCD.
-        lcd_update();
+        if (!PLUGIN_INPUT_CAPTURED()) lcd_update();
 
         // 4. FILESYSTEM MAINTENANCE
         // Recover SD subsystem if media access is lost.
@@ -1558,6 +1558,14 @@ void Controller::keyboard_action() {
         if (keyboard.keyLayer.read) PLUGIN_KEYPAD(0, keyboard.keyLayer.changeState, kLayerLibrarySize);
         if (keyboard.keyLeft.read) PLUGIN_KEYPAD(1, keyboard.keyLeft.changeState, 16);
         if (keyboard.keyRight.read) PLUGIN_KEYPAD(2, keyboard.keyRight.changeState, 16);
+        if (PLUGIN_INPUT_CAPTURED()) {
+            // Presses belong to the plugin page; releases still reach the stock UI so held modifiers clear.
+            for (uint8_t i = 0; i < 16; i++) {
+                if (keyboard.keyLayer.changeState[i] == KEYSTATE_PRESS) keyboard.keyLayer.changeState[i] = KEYSTATE_NONE;
+                if (keyboard.keyLeft.changeState[i] == KEYSTATE_PRESS) keyboard.keyLeft.changeState[i] = KEYSTATE_NONE;
+                if (keyboard.keyRight.changeState[i] == KEYSTATE_PRESS) keyboard.keyRight.changeState[i] = KEYSTATE_NONE;
+            }
+        }
 
         // 2. LAYER KEYPAD DISPATCH
         if (keyboard.keyLayer.read) {
@@ -3074,6 +3082,7 @@ void Controller::encoder_action() {
             // Process only events promoted by encoder_read().
             if (enc.read) {
                 PLUGIN_EVENT(PLUGIN_EVENT_ENCODER, encNum_, (enc.actionCurrent == ENC_INC) ? 1 : -1, 0);
+                if (PLUGIN_INPUT_CAPTURED()) enc.actionCurrent = ENC_NONE;
                 switch (enc.mode) {
                         // --- LOCAL MODE ---
                         // Use menu-bound function mapping.
