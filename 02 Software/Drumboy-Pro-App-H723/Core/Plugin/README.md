@@ -91,7 +91,7 @@ All are macros in `PluginHooks.h` that compile to nothing (or to a constant) in 
 | `PLUGIN_SCREEN_CAPTURED()` | `lcd_update()` call | Manager/show mode own the lane area; stock redraws pause |
 | `PLUGIN_KEY_PASSES(keypad, key)` | capture filter | Keys still allowed through (PLAY/STOP and RESET in the generator) |
 | `PLUGIN_AUDIO_TAP(buffer, frames)` | I2S callbacks | Level/bass/treble peaks (~200 flops per block) |
-| `PLUGIN_BEAT_GATE(layer, bank, beat, start, volume)` | play timer, before a beat plays | Generated steps: probability roll and velocity |
+| `PLUGIN_BEAT_GATE(layer, bank, beat, start, micro, volume)` | play timer, before a beat plays (micro = fill/ratchet repeat index) | Trig condition, probability roll and velocity, decided once per beat |
 | `PLUGIN_BEAT_COLOR(lcd, layer, bank, beat, start)` | `lcd_drawBeat` | Generated steps: tick colour by probability |
 | `PLUGIN_FILE_SAVE(file)` | `sd_saveFile`, after `EOF` | Append the CYBX block |
 | `PLUGIN_FILE_LOADED(file, path, ok)` | `sd_loadFile` | Read the CYBX block |

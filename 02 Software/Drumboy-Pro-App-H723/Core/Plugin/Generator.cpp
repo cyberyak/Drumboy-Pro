@@ -33,10 +33,11 @@ const uint8_t  kGenEvolveChoices[]                  = {0, 4, 8};        // EVOLV
 const uint8_t  kGenEvolveTracks                     = 2;                // Tracks re-rolled per EVOLVE
 const uint8_t  kGenHistorySize                      = 8;
 const uint16_t kGenSongStepsMax                     = 12 * 48;          // 12 bars of 12/4
+const uint32_t kGenLiveMs                           = 80;               // GRIDS / EUCLID knobs: regenerate at most this often
 
 // File extension block: [payload][crc32][payload length]["CYBX"] after the stock EOF marker
 const char     kGenBlockMagic[4]                    = {'C', 'Y', 'B', 'X'};
-const uint8_t  kGenBlockVersion                     = 1;
+const uint8_t  kGenBlockVersion                     = 2;                // 2: conditions, GRIDS, EUCLID, track sources
 const uint16_t kGenBlockMaxPayload                  = 32768;
 
 // clang-format on
@@ -61,15 +62,50 @@ struct PluginAccess {
 extern Controller controller;                                           // main.cpp (file hooks run before the plugin host starts)
 
 /* Step Meta (per generated beat) -----------------------------------*/
-// Probability and velocity the stock beat format can't hold. Keyed by beat slot
-// and validated against the beat's start tick, so beats edited by hand afterwards
-// simply play normally. Saved in the File's extension block.
+// Probability, velocity and trig condition the stock beat format can't hold. Keyed by
+// beat slot and validated against the beat's start tick, so beats edited by hand
+// afterwards simply play normally. Saved in the File's extension block.
 
 struct StepMeta {
     uint16_t tick;
-    uint8_t probability;                                                // 0 = not generated
+    uint8_t probability;                                                // 0 = no meta for this beat
     uint8_t gain;                                                       // Volume multiplier x100
+    uint8_t cond;                                                       // TrigCondition
 };
+
+/* Trig Conditions (OXI / Elektron style) ---------------------------*/
+// 0 = none; 1-35 = A:B (play on loop A of every B, B = 2..8); then FILL, NOT FILL,
+// FIRST (first loop after PLAY), NOT FIRST, PRE (previous condition on the track
+// was true), NOT PRE.
+
+enum TrigCondition : uint8_t { COND_NONE = 0, COND_AB_LAST = 35, COND_FILL, COND_NOT_FILL, COND_FIRST, COND_NOT_FIRST, COND_PRE, COND_NOT_PRE, COND_COUNT };
+
+static bool condRatio(uint8_t cond, uint8_t& a, uint8_t& b) {
+    if ((cond == COND_NONE) || (cond > COND_AB_LAST)) return false;
+    uint8_t index = cond - 1;
+    for (b = 2; b <= 8; b++) {
+        if (index < b) {
+            a = index + 1;
+            return true;
+        }
+        index -= b;
+    }
+    return false;
+}
+
+static void condName(uint8_t cond, char* out, size_t size) {
+    static const char* const kNames[] = {"FILL", "NOT FILL", "FIRST", "NOT FIRST", "PRE", "NOT PRE"};
+    uint8_t a, b;
+    if (cond == COND_NONE) {
+        snprintf(out, size, "NONE");
+    } else if (condRatio(cond, a, b)) {
+        snprintf(out, size, "%u:%u", a, b);
+    } else if (cond < COND_COUNT) {
+        snprintf(out, size, "%s", kNames[cond - COND_FILL]);
+    } else {
+        snprintf(out, size, "?");
+    }
+}
 
 static StepMeta meta[kGenTracks][kBankLibrarySize][kBeatLibrarySize] GEN_FAST_SECTION;
 
@@ -78,20 +114,31 @@ static StepMeta meta[kGenTracks][kBankLibrarySize][kBeatLibrarySize] GEN_FAST_SE
 static Bank undoBanks[kGenTracks] GEN_FAST_SECTION;
 static StepMeta undoMeta[kGenTracks][kBeatLibrarySize] GEN_FAST_SECTION;
 static bool undoFill[kGenTracks];
+static uint8_t undoSource[kGenTracks];
+static bool undoLocked[kGenTracks];
+static EuclidParams undoEuclid[kGenTracks];
 static uint8_t undoBank = 0;
 static bool undoValid = false;
 
 /* Settings, History, Page State ------------------------------------*/
 
 enum GenKnob : uint8_t { KNOB_STYLE, KNOB_DENSITY, KNOB_VARIATION, KNOB_SWING, KNOB_HUMANIZE, KNOB_DYNAMICS, KNOB_PROBABILITY, KNOB_RATCHET };
+enum GenPage : uint8_t { PAGE_GEN, PAGE_GRIDS, PAGE_EUCLID, PAGE_STEP, PAGE_COUNT };
+enum TrackSource : uint8_t { SOURCE_GEN, SOURCE_GRIDS, SOURCE_EUCLID, SOURCE_COUNT };
+
+const char* const kGenPageNames[PAGE_COUNT] = {"GEN", "GRIDS", "EUCLID", "STEP"};
+const char* const kGenSourceNames[SOURCE_COUNT] = {"GEN", "GRIDS", "EUCLID"};
 
 struct GenSettings {
     GenParams params;
     uint32_t salt[kGenTracks];                                          // Per-track re-roll offset
     uint8_t fillChoice;
+    GridsParams grids;
+    uint8_t source[kGenTracks];                                         // TrackSource: which engine made the track
 };
 
-static GenSettings settings = {{STYLE_TECHNO, 60, 30, 50, 20, 60, 40, 20, 4, 1, 0}, {}, 2};
+static GenSettings settings = {{STYLE_TECHNO, 60, 30, 50, 20, 60, 40, 20, 4, 1, 0}, {}, 2, {25, 0, {60, 60, 60}, 0}, {}};
+static EuclidParams euclid[kGenTracks];
 static uint8_t evolveChoice = 0;
 static bool locked[kGenTracks];
 static int8_t roleOverride[kGenTracks];                                // -1 = automatic
@@ -103,6 +150,11 @@ static uint8_t historyNewest = 0;                                       // Ring 
 static uint8_t historyBack = 0;                                         // 0 = newest, 1 = one older, ...
 
 static bool open = false;
+static uint8_t page = PAGE_GEN;
+static uint8_t stepSel = 0;                                             // STEP page: beat index on the selected track
+static bool editOpen = false;                                           // An undo snapshot covers the current knob edits
+static uint16_t livePending = 0;                                        // Tracks to regenerate on the next frame (GRIDS / EUCLID knobs)
+static uint32_t lastLiveTick = 0;
 static bool clearPending = false;
 static bool fillHeld = false;
 static bool dirty = false;
@@ -119,6 +171,13 @@ static uint32_t evolveRandom = 0x9E3779B9u;
 static GenStep steps[kGenMaxSteps];
 static uint32_t occupied[(kGenSongStepsMax + 31) / 32];
 static uint32_t gateRandom = 0x2545F491u;
+
+// Play state per track for conditions (written in the play-timer interrupt)
+static volatile uint16_t gateLastStart[kGenTracks];                     // 0xFFFF = no beat since PLAY / RESET
+static volatile uint16_t loopCount[kGenTracks];
+static volatile bool gatePlay[kGenTracks];                              // Decision for the current beat (ratchet repeats reuse it)
+static volatile float gateGain[kGenTracks];
+static volatile bool preResult[kGenTracks];
 static bool stateReady = false;
 
 static void ensureState() {
@@ -128,6 +187,11 @@ static void ensureState() {
     for (uint8_t i = 0; i < kGenTracks; i++) {
         roleOverride[i] = -1;
         locked[i] = false;
+        euclid[i] = {16, 4, 0, RATE_16, 110, 0, 100};
+        gateLastStart[i] = 0xFFFF;
+        loopCount[i] = 0;
+        gatePlay[i] = true;
+        gateGain[i] = 1.0f;
     }
     stateReady = true;
 }
@@ -206,7 +270,7 @@ static void writeTrack(Controller& c, uint8_t track, uint8_t bank, const GenStep
 
     for (uint8_t k = 0; k < kBeatLibrarySize; k++) {
         b.resetBeat(k);
-        meta[track][bank][k] = {0, 0, 0};
+        meta[track][bank][k] = {0, 0, 0, COND_NONE};
     }
     b.lastActiveBeatNum = -1;
     b.playBeatNum = -1;
@@ -235,7 +299,7 @@ static void writeTrack(Controller& c, uint8_t track, uint8_t bank, const GenStep
 
         float gain = (list[k].velocity / 127.0f) / base;
         if (gain > 2.5f) gain = 2.5f;
-        meta[track][bank][written] = {start, list[k].probability, (uint8_t)(gain * 100.0f)};
+        meta[track][bank][written] = {start, list[k].probability, (uint8_t)(gain * 100.0f), COND_NONE};
         written++;
     }
     PluginAccess::recalculate(c, track, bank);
@@ -248,11 +312,15 @@ static void writeTrack(Controller& c, uint8_t track, uint8_t bank, const GenStep
 }
 
 static void snapshot(Controller& c, uint8_t bank) {
+    editOpen = false;  // The next knob edit starts a new undo step
     for (uint8_t i = 0; i < kGenTracks; i++) {
         Layer& layer = PluginAccess::layer(c, i);
         undoBanks[i] = layer.bankLibrary[bank];
         memcpy(undoMeta[i], meta[i][bank], sizeof(undoMeta[i]));
         undoFill[i] = layer.fill;
+        undoSource[i] = settings.source[i];
+        undoLocked[i] = locked[i];
+        undoEuclid[i] = euclid[i];
     }
     undoBank = bank;
     undoValid = true;
@@ -263,6 +331,7 @@ static void undo(Controller& c) {
         setStatus(true, "NOTHING TO UNDO");
         return;
     }
+    livePending = 0;  // A pending live edit must not overwrite the undo
     uint32_t primask = __get_PRIMASK();
     __disable_irq();
     for (uint8_t i = 0; i < kGenTracks; i++) {
@@ -274,10 +343,14 @@ static void undo(Controller& c) {
     __set_PRIMASK(primask);
 
     for (uint8_t i = 0; i < kGenTracks; i++) {
+        settings.source[i] = undoSource[i];
+        locked[i] = undoLocked[i];
+        euclid[i] = undoEuclid[i];
         if (PluginAccess::layer(c, i).fill != undoFill[i]) PluginAccess::setFill(c, i, undoFill[i]);
         if (undoBank == PluginAccess::activeBank(c)) PluginAccess::drawSong(c, i, undoBank);
     }
     undoValid = false;
+    editOpen = false;
     setStatus(false, "UNDONE - BANK %u IS BACK TO HOW IT WAS", undoBank + 1);
 }
 
@@ -301,7 +374,14 @@ static uint8_t regenerate(Controller& c, uint16_t mask, const uint32_t* mutation
             p.seed ^= settings.salt[i] * 0x9E3779B9u;
             p.mutation = (mutation != nullptr) ? mutation[i] : 0;
 
-            uint8_t n = gen_generate(role, p, stepsPerBar, bars, i, occupied, steps);
+            uint8_t n;
+            if ((settings.source[i] == SOURCE_GRIDS) && (gen_gridsPart(role) != GRIDS_NONE)) {
+                n = gen_grids(role, settings.grids, p, stepsPerBar, bars, i, steps);
+            } else if (settings.source[i] == SOURCE_EUCLID) {
+                n = gen_euclid(euclid[i], PluginAccess::songInterval(c), steps, nullptr);
+            } else {
+                n = gen_generate(role, p, stepsPerBar, bars, i, occupied, steps);
+            }
             writeTrack(c, i, bank, steps, n);
             if (isBackbone(role)) {
                 for (uint8_t k = 0; k < n; k++) markOccupied(steps[k].tick);
@@ -333,7 +413,12 @@ static void historyGo(Controller& c, int8_t direction) {
         return;
     }
     historyBack = (uint8_t)back;
+    uint8_t sources[kGenTracks];
+    memcpy(sources, settings.source, sizeof(sources));
     settings = history[(historyNewest + kGenHistorySize - historyBack) % kGenHistorySize];
+    for (uint8_t i = 0; i < kGenTracks; i++) {
+        if (sources[i] == SOURCE_EUCLID) settings.source[i] = SOURCE_EUCLID;  // Euclid tracks are edited, not part of history
+    }
 
     snapshot(c, PluginAccess::activeBank(c));
     regenerate(c, unlockedMask(), nullptr);
@@ -343,22 +428,52 @@ static void historyGo(Controller& c, int8_t direction) {
 
 /* Actions ----------------------------------------------------------*/
 
+static uint16_t gridsMask() {
+    uint16_t mask = 0;
+    for (uint8_t i = 0; i < kGenTracks; i++) {
+        if (gen_gridsPart(roleOf(i)) != GRIDS_NONE) mask |= (1u << i);
+    }
+    return mask;
+}
+
+static uint16_t sourceMask(uint8_t source) {
+    uint16_t mask = 0;
+    for (uint8_t i = 0; i < kGenTracks; i++) {
+        if (settings.source[i] == source) mask |= (1u << i);
+    }
+    return mask;
+}
+
 static void generateAll(Controller& c, bool newSeed) {
+    // GEN page: every unlocked track from the recipes. GRIDS page: unlocked kick / snare / hat tracks from the map.
+    bool grids = (page == PAGE_GRIDS);
+    uint16_t mask = unlockedMask() & (grids ? gridsMask() : 0xFFFF);
+    if (mask == 0) {
+        setStatus(true, grids ? "NO UNLOCKED KICK, SNARE OR HAT TRACKS" : "ALL TRACKS ARE LOCKED");
+        return;
+    }
     if (newSeed) {
         settings.params.seed = (settings.params.seed * 1103515245u + 12345u + HAL_GetTick()) % 10000u;
         memset(settings.salt, 0, sizeof(settings.salt));
     }
+    for (uint8_t i = 0; i < kGenTracks; i++) {
+        if (mask & (1u << i)) settings.source[i] = grids ? SOURCE_GRIDS : SOURCE_GEN;
+    }
     uint8_t bank = PluginAccess::activeBank(c);
     snapshot(c, bank);
-    uint8_t n = regenerate(c, unlockedMask(), nullptr);
+    uint8_t n = regenerate(c, mask, nullptr);
     historyPush();
     setStatus(false, "GENERATED %u TRACKS (%s, SEED %lu) INTO BANK %u - FILE > SAVE TO KEEP, CLEAR = UNDO", n,
-              kGenStyleNames[settings.params.style], (unsigned long)settings.params.seed, bank + 1);
+              grids ? "GRIDS" : kGenStyleNames[settings.params.style], (unsigned long)settings.params.seed, bank + 1);
 }
 
 static void rerollSelected(Controller& c) {
     if (locked[selected]) {
         setStatus(true, "TRACK %02u IS LOCKED - SELECT UNLOCKS IT", selected + 1);
+        return;
+    }
+    if (settings.source[selected] == SOURCE_EUCLID) {
+        setStatus(true, "TRACK %02u IS EUCLIDEAN - EDIT IT ON THE EUCLID PAGE", selected + 1);
         return;
     }
     settings.salt[selected] = nextRandom(evolveRandom) | 1u;
@@ -371,7 +486,7 @@ static void rerollSelected(Controller& c) {
 static void evolve(Controller& c) {
     /// @brief Re-rolls the per-bar details of a few unlocked tracks (base groove stays), while playing.
 
-    uint16_t candidates = unlockedMask();
+    uint16_t candidates = unlockedMask() & ~sourceMask(SOURCE_EUCLID);
     uint16_t mask = 0;
     uint32_t mutation[kGenTracks] = {};
     for (uint8_t n = 0; (n < kGenEvolveTracks) && candidates; n++) {
@@ -391,6 +506,61 @@ static void evolve(Controller& c) {
     if (open) setStatus(false, "EVOLVED %s%s", kGenRoleNames[roleOf(__builtin_ctz(mask))], (mask & (mask - 1)) ? " + 1 MORE TRACK" : "");
 }
 
+/* Live Edits (GRIDS / EUCLID knobs, STEP page) ---------------------*/
+
+static bool metaValid(Controller& c, uint8_t track, uint8_t bank, uint8_t beat);
+
+static void beginEdit(Controller& c) {
+    // One undo step per run of knob edits (cleared by any other action, page or track change)
+    if (editOpen) return;
+    snapshot(c, PluginAccess::activeBank(c));
+    editOpen = true;
+}
+
+static void endEdit() {
+    editOpen = false;
+}
+
+static Bank& selectedBank(Controller& c) {
+    return PluginAccess::layer(c, selected).bankLibrary[PluginAccess::activeBank(c)];
+}
+
+static uint8_t stepCount(Controller& c) {
+    return (uint8_t)(selectedBank(c).lastActiveBeatNum + 1);
+}
+
+static void redrawLane(Controller& c, uint8_t track) {
+    if (!pluginHost_isScreenCaptured()) PluginAccess::drawSong(c, track, PluginAccess::activeBank(c));
+}
+
+static StepMeta& selectedMeta(Controller& c) {
+    // Meta for the selected beat; hand-made beats get a neutral entry (always plays, level as recorded)
+    uint8_t bank = PluginAccess::activeBank(c);
+    if (!metaValid(c, selected, bank, stepSel)) {
+        meta[selected][bank][stepSel] = {selectedBank(c).beatLibrary[stepSel].getStartInterval(), 100, 100, COND_NONE};
+    }
+    return meta[selected][bank][stepSel];
+}
+
+static void selectTrack(Controller& c, uint8_t track) {
+    if (track == selected) return;
+    uint8_t old = selected;
+    selected = track;
+    stepSel = 0;
+    endEdit();
+    if (page == PAGE_STEP) {
+        redrawLane(c, old);
+        redrawLane(c, selected);
+    }
+}
+
+static void setPage(Controller& c, uint8_t next) {
+    bool stepShown = (page == PAGE_STEP) || (next == PAGE_STEP);
+    page = next;
+    endEdit();
+    if (stepShown) redrawLane(c, selected);  // Show / hide the selected-step highlight
+}
+
 /* Drawing ----------------------------------------------------------*/
 
 static void drawMarker(Lcd& lcd, uint8_t row, bool on) {
@@ -399,23 +569,79 @@ static void drawMarker(Lcd& lcd, uint8_t row, bool on) {
     lcd.fillRect(kGenMarkerX, kImageLayerY[row] + 8, 8, 14);
 }
 
+static void drawParams(Controller& c, char* text, size_t size) {
+    const GenParams& p = settings.params;
+    char fill[8], evo[8];
+    (kGenFillChoices[settings.fillChoice] == 0) ? snprintf(fill, sizeof(fill), "OFF") : snprintf(fill, sizeof(fill), "%u", kGenFillChoices[settings.fillChoice]);
+    (kGenEvolveChoices[evolveChoice] == 0) ? snprintf(evo, sizeof(evo), "OFF") : snprintf(evo, sizeof(evo), "%u", kGenEvolveChoices[evolveChoice]);
+
+    switch (page) {
+        case PAGE_GRIDS: {
+            static const char* const kFeel[] = {"STRAIGHT", "ELECTRO", "BROKEN"};
+            const GridsParams& g = settings.grids;
+            snprintf(text, size, "GRIDS X %u Y %u (%s)  KICK %u  SNARE %u  HATS %u  CHAOS %u  SWING %u  DYN %u  EVOLVE %s  SEED %lu", g.x, g.y,
+                     kFeel[(g.y + 25) / 50 > 2 ? 2 : (g.y + 25) / 50], g.density[GRIDS_KICK], g.density[GRIDS_SNARE], g.density[GRIDS_HATS], g.chaos,
+                     p.swing, p.dynamics, evo, (unsigned long)p.seed);
+            break;
+        }
+        case PAGE_EUCLID: {
+            const EuclidParams& e = euclid[selected];
+            snprintf(text, size, "EUCLID TRK %02u  E(%u,%u)  STEPS %u  PULSES %u  ROTATE %u  RATE %s  VELO %u  ACCENTS %u  PROB %u%s", selected + 1,
+                     e.pulses, e.steps, e.steps, e.pulses, e.rotate, kGenRateNames[e.rate], e.velocity, e.accents, e.probability,
+                     (settings.source[selected] == SOURCE_EUCLID) ? "" : "  (TURN A KNOB TO START)");
+            break;
+        }
+        case PAGE_STEP: {
+            uint8_t count = stepCount(c);
+            if (count == 0) {
+                snprintf(text, size, "STEP TRK %02u  NO BEATS IN THIS BANK", selected + 1);
+                break;
+            }
+            if (stepSel >= count) stepSel = count - 1;
+            uint8_t bank = PluginAccess::activeBank(c);
+            uint16_t tick = selectedBank(c).beatLibrary[stepSel].getStartInterval();
+            uint8_t stepsPerBar = PluginAccess::beatsPerBar(c) * 4;
+            uint16_t step16 = tick / kGenTicksPerStep;
+            bool has = metaValid(c, selected, bank, stepSel);
+            const StepMeta& m = meta[selected][bank][stepSel];
+            char cond[12];
+            condName(has ? m.cond : COND_NONE, cond, sizeof(cond));
+            snprintf(text, size, "STEP TRK %02u  %02u/%02u  BAR %u STEP %u%s  COND %s  PROB %u  LEVEL %u%%", selected + 1, stepSel + 1, count,
+                     step16 / stepsPerBar + 1, step16 % stepsPerBar + 1, (tick % kGenTicksPerStep) ? "+" : "", cond, has ? m.probability : 100,
+                     has ? m.gain : 100);
+            break;
+        }
+        default:
+            snprintf(text, size, "GEN %s  DENS %u  VAR %u  SWING %u  HUM %u  DYN %u  PROB %u  RATCH %u  FILL %s  EVOLVE %s  SEED %lu",
+                     kGenStyleNames[p.style], p.density, p.variation, p.swing, p.humanize, p.dynamics, p.probability, p.ratchet, fill, evo,
+                     (unsigned long)p.seed);
+            break;
+    }
+}
+
+static void drawKeys(char* text, size_t size) {
+    // Keep in sync with the key handling in generator_handleEvent
+    static const char* const kKeys[PAGE_COUNT] = {
+        "GLOBAL GEN  PASTE NEW  MUTE TRK  L/R HIST  CLEAR UNDO  SELECT LOCK  COPY ROLE  SONG FILL  REC EVOLVE  STYLE PAGE",
+        "GLOBAL GEN DRUMS  PASTE NEW  MUTE TRK  L/R HIST  CLEAR UNDO  SELECT LOCK  COPY ROLE  REC EVOLVE  STYLE PAGE",
+        "KNOBS EDIT LIVE  L/R ROTATE  PASTE RANDOM  MUTE RELEASE  CLEAR UNDO  STYLE PAGE",
+        "L/R STEP  KNOB1 COND  KNOB2 PROB  KNOB3 LEVEL  GLOBAL RESET STEP  CLEAR UNDO  STYLE PAGE",
+    };
+    snprintf(text, size, "TRK %02u %s %s %s%s | %s", selected + 1, kGenRoleNames[roleOf(selected)], (roleOverride[selected] >= 0) ? "SET" : "AUTO",
+             kGenSourceNames[settings.source[selected] % SOURCE_COUNT], locked[selected] ? " LOCK" : "", kKeys[page]);
+}
+
 static void drawLines(Controller& c) {
     Lcd& lcd = c.lcd;
-    char text[140];
-    const GenParams& p = settings.params;
+    char text[160];
 
     lcd.setFont(FONT_05x07);
     lcd.setAlignment(LEFT);
     lcd.setBackColor(BLACK);
     lcd.clearRect(kGenTextX, kGenLine1Y - 1, kGenTextWidth, 19);
 
-    // 1. PARAMETERS (kept short: the File menu's build label sits at the right end of this line)
-    char fill[8], evo[8];
-    (kGenFillChoices[settings.fillChoice] == 0) ? snprintf(fill, sizeof(fill), "OFF") : snprintf(fill, sizeof(fill), "%u", kGenFillChoices[settings.fillChoice]);
-    (kGenEvolveChoices[evolveChoice] == 0) ? snprintf(evo, sizeof(evo), "OFF") : snprintf(evo, sizeof(evo), "%u", kGenEvolveChoices[evolveChoice]);
-    snprintf(text, sizeof(text), "GEN %s  DENS %u  VAR %u  SWING %u  HUM %u  DYN %u  PROB %u  RATCH %u  FILL %s  EVOLVE %s  SEED %lu",
-             kGenStyleNames[p.style], p.density, p.variation, p.swing, p.humanize, p.dynamics, p.probability, p.ratchet, fill, evo,
-             (unsigned long)p.seed);
+    // 1. PARAMETERS OF THE PAGE (kept short: the File menu's build label sits at the right end of this line)
+    drawParams(c, text, sizeof(text));
     lcd.setForeColor(CYAN);
     lcd.drawText(text, strlen(text), kGenTextX, kGenLine1Y);
 
@@ -424,8 +650,7 @@ static void drawLines(Controller& c) {
         lcd.setForeColor(statusError ? RED : YELLOW);
         lcd.drawText(status, strlen(status), kGenTextX, kGenLine2Y);
     } else {
-        snprintf(text, sizeof(text), "TRK %02u %s %s%s | GLOBAL GEN  PASTE NEW  MUTE TRK  L/R HIST  CLEAR UNDO  SELECT LOCK  COPY ROLE  SONG FILL  REC EVOLVE",
-                 selected + 1, kGenRoleNames[roleOf(selected)], (roleOverride[selected] >= 0) ? "SET" : "AUTO", locked[selected] ? " LOCK" : "");
+        drawKeys(text, sizeof(text));
         lcd.setForeColor(WHITE);
         lcd.drawText(text, strlen(text), kGenTextX, kGenLine2Y);
     }
@@ -439,9 +664,11 @@ static void drawLines(Controller& c) {
 }
 
 /* File Extension Block ---------------------------------------------*/
-// Payload: version, settings, salts, locks, role overrides, then one 7-byte record per
-// generated beat (track, bank, beat, probability, gain, tick). Written and read in small
-// pieces so FatFs copies through the FIL buffer (DMA never touches DTCM).
+// Payload: version, settings, salts, locks, role overrides; version 2 adds the GRIDS
+// settings, track sources and per-track Euclid settings, and conditions in the records.
+// Then one record per beat with meta: track, bank, beat, probability, gain, tick (u16)
+// and (v2) condition. Written and read in small pieces so FatFs copies through the FIL
+// buffer (DMA never touches DTCM).
 
 static uint32_t crc32Update(uint32_t crc, const uint8_t* data, uint32_t len) {
     crc = ~crc;
@@ -505,6 +732,15 @@ static void saveBlock(FIL& file) {
     for (uint8_t i = 0; i < kGenTracks; i++) lockMask |= locked[i] ? (1u << i) : 0;
     w.put(&lockMask, sizeof(lockMask));
     w.put(roleOverride, sizeof(roleOverride));
+    const GridsParams& g = settings.grids;
+    uint8_t grids[6] = {g.x, g.y, g.density[GRIDS_KICK], g.density[GRIDS_SNARE], g.density[GRIDS_HATS], g.chaos};
+    w.put(grids, sizeof(grids));
+    w.put(settings.source, sizeof(settings.source));
+    for (uint8_t i = 0; i < kGenTracks; i++) {
+        const EuclidParams& e = euclid[i];
+        uint8_t data[7] = {e.steps, e.pulses, e.rotate, e.rate, e.velocity, e.accents, e.probability};
+        w.put(data, sizeof(data));
+    }
     w.put(&records, sizeof(records));
 
     // 3. RECORDS
@@ -513,7 +749,7 @@ static void saveBlock(FIL& file) {
             for (uint8_t k = 0; k < kBeatLibrarySize; k++) {
                 if (!metaValid(c, t, b, k)) continue;
                 const StepMeta& m = meta[t][b][k];
-                uint8_t record[7] = {t, b, k, m.probability, m.gain, (uint8_t)(m.tick & 0xFF), (uint8_t)(m.tick >> 8)};
+                uint8_t record[8] = {t, b, k, m.probability, m.gain, (uint8_t)(m.tick & 0xFF), (uint8_t)(m.tick >> 8), m.cond};
                 w.put(record, sizeof(record));
             }
         }
@@ -568,8 +804,10 @@ static void loadBlock(FIL& file, const char* path, bool songLoaded) {
     f_lseek(&file, size - 12 - length);
     uint8_t header[12];
     r.get(header, sizeof(header));
-    if (header[0] != kGenBlockVersion) {
+    uint8_t version = header[0];
+    if ((version == 0) || (version > kGenBlockVersion)) {
         f_close(&file);
+        pluginHost_message("FILE: GENERATOR DATA FROM A NEWER FIRMWARE - BEATS LOADED WITHOUT IT", true);
         return;
     }
     GenSettings loaded = settings;
@@ -590,6 +828,23 @@ static void loadBlock(FIL& file, const char* path, bool songLoaded) {
     r.get(&lockMask, sizeof(lockMask));
     int8_t roles[kGenTracks];
     r.get(roles, sizeof(roles));
+    memset(loaded.source, SOURCE_GEN, sizeof(loaded.source));
+    EuclidParams euclidLoaded[kGenTracks];
+    memcpy(euclidLoaded, euclid, sizeof(euclidLoaded));
+    if (version >= 2) {
+        uint8_t grids[6];
+        r.get(grids, sizeof(grids));
+        loaded.grids = {grids[0], grids[1], {grids[2], grids[3], grids[4]}, grids[5]};
+        r.get(loaded.source, sizeof(loaded.source));
+        for (uint8_t i = 0; i < kGenTracks; i++) {
+            uint8_t d[7] = {};
+            r.get(d, sizeof(d));
+            loaded.source[i] %= SOURCE_COUNT;
+            uint8_t steps = (d[0] < 1) ? 1 : (d[0] > 32) ? 32 : d[0];
+            uint8_t pulses = (d[1] > steps) ? steps : d[1];
+            euclidLoaded[i] = {steps, pulses, (uint8_t)(d[2] % steps), (uint8_t)(d[3] % RATE_COUNT), d[4], (d[5] > pulses) ? pulses : d[5], d[6]};
+        }
+    }
     uint16_t records = 0;
     r.get(&records, sizeof(records));
     if (!r.ok) {
@@ -598,6 +853,7 @@ static void loadBlock(FIL& file, const char* path, bool songLoaded) {
     }
 
     settings = loaded;
+    memcpy(euclid, euclidLoaded, sizeof(euclid));
     evolveChoice = evolveLoaded;
     for (uint8_t i = 0; i < kGenTracks; i++) {
         locked[i] = lockMask & (1u << i);
@@ -606,12 +862,12 @@ static void loadBlock(FIL& file, const char* path, bool songLoaded) {
 
     // 4. RECORDS (applied only where the loaded beat matches)
     for (uint16_t n = 0; r.ok && (n < records); n++) {
-        uint8_t record[7];
-        r.get(record, sizeof(record));
+        uint8_t record[8] = {};
+        r.get(record, (version >= 2) ? 8 : 7);
         uint8_t t = record[0], b = record[1], k = record[2];
         if (!r.ok || (t >= kGenTracks) || (b >= kBankLibrarySize) || (k >= kBeatLibrarySize)) continue;
-        meta[t][b][k] = {(uint16_t)(record[5] | (record[6] << 8)), record[3], record[4]};
-        if (!metaValid(c, t, b, k)) meta[t][b][k] = {0, 0, 0};
+        meta[t][b][k] = {(uint16_t)(record[5] | (record[6] << 8)), record[3], record[4], (uint8_t)((record[7] < COND_COUNT) ? record[7] : COND_NONE)};
+        if (!metaValid(c, t, b, k)) meta[t][b][k] = {0, 0, 0, COND_NONE};
     }
     f_close(&file);
 }
@@ -642,12 +898,141 @@ bool generator_isOpen() {
 }
 
 bool generator_needsFrame() {
-    return open || clearPending;
+    return open || clearPending || livePending;  // Live edits still land after closing
 }
 
 bool generator_keyPasses(uint8_t keypad, uint8_t key) {
     // Transport keeps working while the generator is open
     return open && (keypad == kKeypadLeft) && ((key == KEY_PLAYSTOP) || (key == KEY_RESET));
+}
+
+static void resetLoops() {
+    // PLAY / RESET: conditions count loops from here (FIRST = the first loop)
+    for (uint8_t i = 0; i < kGenTracks; i++) {
+        gateLastStart[i] = 0xFFFF;
+        loopCount[i] = 0;
+        preResult[i] = false;
+    }
+}
+
+static void clampStep(uint8_t& v, int8_t d, int16_t perClick, int16_t lo, int16_t hi) {
+    int16_t n = (int16_t)v + d * perClick;
+    v = (uint8_t)((n < lo) ? lo : (n > hi) ? hi : n);
+}
+
+static void knobGen(uint8_t knob, int8_t d) {
+    GenParams& p = settings.params;
+    switch (knob) {
+        case KNOB_STYLE: p.style = (uint8_t)((p.style + STYLE_COUNT + d) % STYLE_COUNT); break;
+        case KNOB_DENSITY: clampStep(p.density, d, 5, 0, 100); break;
+        case KNOB_VARIATION: clampStep(p.variation, d, 5, 0, 100); break;
+        case KNOB_SWING: clampStep(p.swing, d, 1, 50, 75); break;
+        case KNOB_HUMANIZE: clampStep(p.humanize, d, 5, 0, 100); break;
+        case KNOB_DYNAMICS: clampStep(p.dynamics, d, 5, 0, 100); break;
+        case KNOB_PROBABILITY: clampStep(p.probability, d, 5, 0, 100); break;
+        case KNOB_RATCHET: clampStep(p.ratchet, d, 5, 0, 100); break;
+        default: break;
+    }
+}
+
+static void knobGrids(Controller& c, uint8_t knob, int8_t d) {
+    // X, Y, KICK, SNARE, HATS, CHAOS, SWING, DYNAMICS; GRIDS tracks follow live
+    GridsParams& g = settings.grids;
+    switch (knob) {
+        case 0: clampStep(g.x, d, 5, 0, 100); break;
+        case 1: clampStep(g.y, d, 5, 0, 100); break;
+        case 2: clampStep(g.density[GRIDS_KICK], d, 5, 0, 100); break;
+        case 3: clampStep(g.density[GRIDS_SNARE], d, 5, 0, 100); break;
+        case 4: clampStep(g.density[GRIDS_HATS], d, 5, 0, 100); break;
+        case 5: clampStep(g.chaos, d, 5, 0, 100); break;
+        case 6: clampStep(settings.params.swing, d, 1, 50, 75); break;
+        case 7: clampStep(settings.params.dynamics, d, 5, 0, 100); break;
+        default: return;
+    }
+    uint16_t live = sourceMask(SOURCE_GRIDS) & unlockedMask();
+    if (live == 0) {
+        setStatus(false, "PRESS GLOBAL TO GENERATE THE DRUMS FROM THE MAP");
+        return;
+    }
+    beginEdit(c);
+    livePending |= live;
+}
+
+static void applyEuclid(Controller& c) {
+    // The selected track becomes (and stays) Euclidean: locked so GEN / GRIDS keep it
+    beginEdit(c);
+    settings.source[selected] = SOURCE_EUCLID;
+    locked[selected] = true;
+    livePending |= (1u << selected);
+}
+
+static void knobEuclid(Controller& c, uint8_t knob, int8_t d) {
+    EuclidParams& e = euclid[selected];
+    switch (knob) {
+        case 0: clampStep(e.steps, d, 1, 1, 32); break;
+        case 1: clampStep(e.pulses, d, 1, 0, e.steps); break;
+        case 2: e.rotate = (uint8_t)((e.rotate + e.steps + d) % e.steps); break;
+        case 3: clampStep(e.rate, d, 1, 0, RATE_COUNT - 1); break;
+        case 4: clampStep(e.velocity, d, 5, 10, 127); break;
+        case 5: clampStep(e.accents, d, 1, 0, e.pulses); break;
+        case 6: clampStep(e.probability, d, 5, 10, 100); break;
+        default: return;
+    }
+    if (e.pulses > e.steps) e.pulses = e.steps;
+    if (e.rotate >= e.steps) e.rotate = 0;
+    if (e.accents > e.pulses) e.accents = e.pulses;
+    applyEuclid(c);
+}
+
+static void knobStep(Controller& c, uint8_t knob, int8_t d) {
+    if (stepCount(c) == 0) return;
+    if (stepSel >= stepCount(c)) stepSel = stepCount(c) - 1;
+    beginEdit(c);
+    StepMeta& m = selectedMeta(c);
+    switch (knob) {
+        case 0: m.cond = (uint8_t)((m.cond + COND_COUNT + d) % COND_COUNT); break;
+        case 1: clampStep(m.probability, d, 5, 5, 100); break;
+        case 2: clampStep(m.gain, d, 5, 10, 250); break;
+        default: return;
+    }
+    redrawLane(c, selected);
+}
+
+static void stepGo(Controller& c, int8_t direction) {
+    uint8_t count = stepCount(c);
+    if (count == 0) return;
+    stepSel = (uint8_t)((stepSel + count + direction) % count);
+    endEdit();
+    redrawLane(c, selected);
+}
+
+static void stepReset(Controller& c) {
+    if (stepCount(c) == 0) return;
+    beginEdit(c);
+    StepMeta& m = selectedMeta(c);
+    m.cond = COND_NONE;
+    m.probability = 100;
+    m.gain = 100;
+    redrawLane(c, selected);
+    setStatus(false, "STEP %u RESET: ALWAYS PLAYS AT ITS RECORDED LEVEL", stepSel + 1);
+}
+
+static void euclidRandom(Controller& c) {
+    EuclidParams& e = euclid[selected];
+    e.pulses = 1 + nextRandom(evolveRandom) % e.steps;
+    e.rotate = nextRandom(evolveRandom) % e.steps;
+    e.accents = (e.pulses > 2) ? nextRandom(evolveRandom) % (e.pulses / 2 + 1) : 0;
+    applyEuclid(c);
+}
+
+static void euclidRelease() {
+    if (settings.source[selected] != SOURCE_EUCLID) {
+        setStatus(true, "TRACK %02u IS NOT EUCLIDEAN", selected + 1);
+        return;
+    }
+    settings.source[selected] = SOURCE_GEN;
+    locked[selected] = false;
+    setStatus(false, "TRACK %02u RELEASED: BEATS KEPT, GEN / GRIDS MAY CHANGE IT AGAIN", selected + 1);
 }
 
 bool generator_handleEvent(const PluginEvent& e, Controller& c) {
@@ -665,13 +1050,19 @@ bool generator_handleEvent(const PluginEvent& e, Controller& c) {
         return false;  // Steps still reach plugins
     }
 
-    // 2. FILL HELD (tracked open or closed: FILL + STYLE toggles the page)
+    // 2. TRANSPORT (open or closed): conditions count loops from PLAY / RESET
+    if ((e.type == PLUGIN_EVENT_KEY) && e.c && (e.a == kKeypadLeft) && ((e.b == KEY_PLAYSTOP) || (e.b == KEY_RESET))) {
+        resetLoops();
+        return false;
+    }
+
+    // 3. FILL HELD (tracked open or closed: FILL + STYLE toggles the page, FILL / NOT FILL conditions)
     if ((e.type == PLUGIN_EVENT_KEY) && (e.a == kKeypadLeft) && (e.b == KEY_FILL)) {
         fillHeld = e.c;
         return open;
     }
 
-    // 3. CLOSED: WATCH FOR FILL + STYLE
+    // 4. CLOSED: WATCH FOR FILL + STYLE
     if (!open) {
         if ((e.type == PLUGIN_EVENT_KEY) && e.c && (e.a == kKeypadLeft) && (e.b == KEY_STYLE) && fillHeld && !manager_isOpen()) {
             if (PluginAccess::recording(c)) {
@@ -684,24 +1075,14 @@ bool generator_handleEvent(const PluginEvent& e, Controller& c) {
         return false;
     }
 
-    // 4. OPEN: KNOBS = PARAMETERS
-    GenParams& p = settings.params;
+    // 5. OPEN: KNOBS = PARAMETERS OF THE PAGE
     if (e.type == PLUGIN_EVENT_ENCODER) {
         int8_t d = (int8_t)e.b;
-        auto step = [d](uint8_t& v, int16_t perClick, int16_t lo, int16_t hi) {
-            int16_t n = (int16_t)v + d * perClick;
-            v = (uint8_t)((n < lo) ? lo : (n > hi) ? hi : n);
-        };
-        switch (e.a) {
-            case KNOB_STYLE: p.style = (uint8_t)((p.style + STYLE_COUNT + d) % STYLE_COUNT); break;
-            case KNOB_DENSITY: step(p.density, 5, 0, 100); break;
-            case KNOB_VARIATION: step(p.variation, 5, 0, 100); break;
-            case KNOB_SWING: step(p.swing, 1, 50, 75); break;
-            case KNOB_HUMANIZE: step(p.humanize, 5, 0, 100); break;
-            case KNOB_DYNAMICS: step(p.dynamics, 5, 0, 100); break;
-            case KNOB_PROBABILITY: step(p.probability, 5, 0, 100); break;
-            case KNOB_RATCHET: step(p.ratchet, 5, 0, 100); break;
-            default: break;
+        switch (page) {
+            case PAGE_GRIDS: knobGrids(c, e.a, d); break;
+            case PAGE_EUCLID: knobEuclid(c, e.a, d); break;
+            case PAGE_STEP: knobStep(c, e.a, d); break;
+            default: knobGen(e.a, d); break;
         }
         dirty = true;
         return true;
@@ -709,30 +1090,60 @@ bool generator_handleEvent(const PluginEvent& e, Controller& c) {
     if (e.type != PLUGIN_EVENT_KEY) return false;  // Notes and MIDI still reach plugins
     if (!e.c) return true;                          // Releases (stock gets them anyway)
 
-    // 5. OPEN: KEYS (printed names in comments where they differ)
+    // 6. OPEN: KEYS (printed names in comments where they differ; keep drawKeys in sync)
     if (e.a == kKeypadLayer) {
-        if (e.b < kGenTracks) selected = e.b;  // Layer key selects that track
+        if (e.b < kGenTracks) selectTrack(c, e.b);  // Layer key selects that track
     } else if (e.a == kKeypadRight) {
         if (e.b == KEY_FILE) closePage();
     } else if (e.a == kKeypadLeft) {
+        // Keys on every page
         switch (e.b) {
-            case KEY_UP: selected = (selected + kGenTracks - 1) % kGenTracks; break;
-            case KEY_DOWN: selected = (selected + 1) % kGenTracks; break;
+            case KEY_UP: selectTrack(c, (selected + kGenTracks - 1) % kGenTracks); break;
+            case KEY_DOWN: selectTrack(c, (selected + 1) % kGenTracks); break;
             case KEY_ADD: locked[selected] = !locked[selected]; break;  // SELECT
             case KEY_COPY: roleOverride[selected] = (roleOverride[selected] + 2 > ROLE_COUNT) ? -1 : roleOverride[selected] + 1; break;
-            case KEY_CENTER: generateAll(c, false); break;  // GLOBAL
-            case KEY_PASTE: generateAll(c, true); break;
-            case KEY_MUTE: rerollSelected(c); break;
             case KEY_CLEAR: undo(c); break;
-            case KEY_LEFT: historyGo(c, -1); break;
-            case KEY_RIGHT: historyGo(c, +1); break;
             case KEY_SONG: settings.fillChoice = (settings.fillChoice + 1) % sizeof(kGenFillChoices); break;
             case KEY_REC:
                 evolveChoice = (evolveChoice + 1) % sizeof(kGenEvolveChoices);
                 evolveBarCount = 0;
                 break;
             case KEY_STYLE:
-                if (fillHeld) closePage();  // FILL + STYLE again
+                fillHeld ? closePage() : setPage(c, (page + 1) % PAGE_COUNT);  // FILL + STYLE closes, STYLE alone: next page
+                break;
+            default: break;
+        }
+
+        // Keys that depend on the page
+        switch (page) {
+            case PAGE_GEN:
+            case PAGE_GRIDS:
+                switch (e.b) {
+                    case KEY_CENTER: generateAll(c, false); break;  // GLOBAL
+                    case KEY_PASTE: generateAll(c, true); break;
+                    case KEY_MUTE: rerollSelected(c); break;
+                    case KEY_LEFT: historyGo(c, -1); break;
+                    case KEY_RIGHT: historyGo(c, +1); break;
+                    default: break;
+                }
+                break;
+            case PAGE_EUCLID:
+                switch (e.b) {
+                    case KEY_CENTER: applyEuclid(c); break;  // GLOBAL: write the Euclid rhythm again
+                    case KEY_PASTE: euclidRandom(c); break;
+                    case KEY_MUTE: euclidRelease(); break;
+                    case KEY_LEFT: knobEuclid(c, 2, -1); break;
+                    case KEY_RIGHT: knobEuclid(c, 2, +1); break;
+                    default: break;
+                }
+                break;
+            case PAGE_STEP:
+                switch (e.b) {
+                    case KEY_CENTER: stepReset(c); break;  // GLOBAL
+                    case KEY_LEFT: stepGo(c, -1); break;
+                    case KEY_RIGHT: stepGo(c, +1); break;
+                    default: break;
+                }
                 break;
             default: break;
         }
@@ -743,6 +1154,21 @@ bool generator_handleEvent(const PluginEvent& e, Controller& c) {
 
 void generator_frame(Controller& c) {
     uint32_t tick = HAL_GetTick();
+
+    // 1. LIVE EDITS (GRIDS / EUCLID knobs), throttled
+    if (livePending && ((tick - lastLiveTick) >= kGenLiveMs)) {
+        uint16_t mask = livePending;
+        livePending = 0;
+        lastLiveTick = tick;
+        regenerate(c, mask, nullptr);
+        if ((page == PAGE_EUCLID) && (mask & (1u << selected))) {
+            uint16_t wanted = 0;
+            gen_euclid(euclid[selected], PluginAccess::songInterval(c), steps, &wanted);
+            if (wanted > kGenMaxSteps) setStatus(true, "E(%u,%u) NEEDS %u HITS - CUT AT THE 64-BEAT LIMIT", euclid[selected].pulses, euclid[selected].steps, wanted);
+        }
+        dirty = true;
+    }
+
     if (open) {
         // Redraw on change, when a status expires, and periodically (stock UI may touch the strip)
         if (dirty || ((statusUntil != 0) && (tick >= statusUntil)) || ((tick - lastDrawTick) >= kGenRedrawMs)) {
@@ -762,27 +1188,70 @@ void generator_frame(Controller& c) {
 
 /* Hooks Called From Stock Code -------------------------------------*/
 
-void pluginHost_beatGate(uint8_t layer, uint8_t bank, uint8_t beatNum, uint16_t startInterval, float& volume) {
-    /// @brief Play-timer interrupt: per-step probability roll and velocity for generated beats.
+static bool condTrue(uint8_t cond, uint8_t layer) {
+    uint8_t a, b;
+    if (condRatio(cond, a, b)) return (loopCount[layer] % b) == (a - 1);
+    switch (cond) {
+        case COND_FILL: return fillHeld;
+        case COND_NOT_FILL: return !fillHeld;
+        case COND_FIRST: return loopCount[layer] == 0;
+        case COND_NOT_FIRST: return loopCount[layer] != 0;
+        case COND_PRE: return preResult[layer];
+        case COND_NOT_PRE: return !preResult[layer];
+        default: return true;
+    }
+}
+
+void pluginHost_beatGate(uint8_t layer, uint8_t bank, uint8_t beatNum, uint16_t startInterval, int8_t micro, float& volume) {
+    /// @brief Play-timer interrupt: trig condition, probability roll and velocity, decided once per beat
+    /// (micro 0); fill / ratchet repeats of the same beat follow that decision.
 
     if ((layer >= kGenTracks) || (bank >= kBankLibrarySize) || (beatNum >= kBeatLibrarySize)) return;
-    const StepMeta& m = meta[layer][bank][beatNum];
-    if ((m.probability == 0) || (m.tick != startInterval)) return;  // Not generated, or edited by hand
 
-    if ((m.probability < 100) && ((nextRandom(gateRandom) % 100u) >= m.probability)) {
-        volume = 0.0f;
-        return;
+    if (micro <= 0) {
+        // 1. LOOP COUNT: a beat that doesn't start later than the previous one means the track wrapped around
+        if ((gateLastStart[layer] != 0xFFFF) && (startInterval <= gateLastStart[layer])) loopCount[layer]++;
+        gateLastStart[layer] = startInterval;
+
+        // 2. DECIDE (beats without valid meta always play at their own level)
+        const StepMeta& m = meta[layer][bank][beatNum];
+        bool play = true;
+        float gain = 1.0f;
+        if ((m.probability != 0) && (m.tick == startInterval)) {
+            if (m.cond != COND_NONE) {
+                play = condTrue(m.cond, layer);
+                preResult[layer] = play;
+            }
+            if (play && (m.probability < 100) && ((nextRandom(gateRandom) % 100u) >= m.probability)) play = false;
+            gain = m.gain * 0.01f;
+        }
+        gatePlay[layer] = play;
+        gateGain[layer] = gain;
     }
-    volume *= m.gain * 0.01f;
+
+    if (!gatePlay[layer]) {
+        volume = 0.0f;
+    } else {
+        volume *= gateGain[layer];
+    }
 }
 
 void pluginHost_beatColor(Lcd& lcd, uint8_t layer, uint8_t bank, uint8_t beatNum, uint16_t startInterval) {
-    /// @brief lcd_drawBeat: tick colour by probability (100% keeps the track colour).
+    /// @brief lcd_drawBeat: selected step (STEP page) white, conditional steps magenta, otherwise colour by
+    /// probability (100% keeps the track colour).
 
     if ((layer >= kGenTracks) || (bank >= kBankLibrarySize) || (beatNum >= kBeatLibrarySize)) return;
+    if (open && (page == PAGE_STEP) && (layer == selected) && (beatNum == stepSel) && (bank == controller.getActiveSongBank())) {
+        lcd.setForeColor(WHITE);
+        return;
+    }
     const StepMeta& m = meta[layer][bank][beatNum];
-    if ((m.probability == 0) || (m.tick != startInterval) || (m.probability >= 95)) return;
-    lcd.setForeColor((m.probability >= 70) ? GREEN : (m.probability >= 45) ? YELLOW : (m.probability >= 20) ? ORANGE : RED);
+    if ((m.probability == 0) || (m.tick != startInterval)) return;
+    if (m.cond != COND_NONE) {
+        lcd.setForeColor(MAGENTA);
+    } else if (m.probability < 95) {
+        lcd.setForeColor((m.probability >= 70) ? GREEN : (m.probability >= 45) ? YELLOW : (m.probability >= 20) ? ORANGE : RED);
+    }
 }
 
 void pluginHost_fileSaved(FIL& file) {
