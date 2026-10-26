@@ -9,6 +9,7 @@
 // A raising EXTI on both edges, as on the board.
 
 #include <array>
+#include <atomic>
 #include <cctype>
 #include <chrono>
 #include <cstdio>
@@ -129,6 +130,12 @@ bool panelKey(const std::string& name, bool down) {
     return false;
 }
 
+uint16_t panelKeypadInputs(int keypad) {
+    if (keypad < 0 || keypad > 2) return 0xFFFF;
+    std::lock_guard<std::mutex> lock(expanderMutex);
+    return expanders[deviceKey(false, kKeypads[keypad].address)].inputs;
+}
+
 std::vector<std::string> panelKeyNames() {
     std::vector<std::string> names;
     for (const Keypad& pad : kKeypads) {
@@ -149,6 +156,8 @@ void panelFuncButton(bool down) {
 }
 
 /* Encoders ------------------------------------------------------ */
+
+static std::atomic<int> knobPositions[8];                       // Detents turned so far (for the knob drawing)
 
 struct EncoderPins {
     GPIO_TypeDef* aPort;
@@ -187,6 +196,7 @@ void panelTurn(int encoder, int detents) {
     const auto kEdgeGap = std::chrono::microseconds(1500);
     bool clockwise = detents > 0;
     int count = clockwise ? detents : -detents;
+    knobPositions[encoder] += detents;
     for (int i = 0; i < count; i++) {
         // Phase order for one cycle: (A, B) levels after each change
         static const bool kCw[4][2] = {{false, true}, {false, false}, {true, false}, {true, true}};
@@ -203,7 +213,40 @@ void panelTurn(int encoder, int detents) {
     }
 }
 
+// Turns requested from the window are queued and played out by one worker
+// thread, so the UI never waits for the quadrature edges.
+static std::atomic<int> pendingTurns[8];
+
+void panelTurnAsync(int encoder, int detents) {
+    if (encoder < 0 || encoder > 7 || detents == 0) return;
+    static std::atomic<bool> started(false);
+    if (!started.exchange(true)) {
+        std::thread([] {
+            while (true) {
+                bool idle = true;
+                for (int i = 0; i < 8; i++) {
+                    int n = pendingTurns[i].exchange(0);
+                    if (n) {
+                        panelTurn(i, n);
+                        idle = false;
+                    }
+                }
+                if (idle) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            }
+        }).detach();
+    }
+    pendingTurns[encoder] += detents;
+}
+
+int panelKnobPosition(int encoder) { return (encoder >= 0 && encoder < 8) ? knobPositions[encoder].load() : 0; }
+
 /* LEDs ---------------------------------------------------------- */
+
+uint16_t panelLedOutputs(uint8_t address7) {
+    std::lock_guard<std::mutex> lock(expanderMutex);
+    Expander& e = expanders[deviceKey(true, static_cast<uint8_t>(address7 << 1))];
+    return static_cast<uint16_t>(e.regs[MCP23017_OLATB] << 8 | e.regs[MCP23017_OLATA]);
+}
 
 std::string panelLedsJson() {
     std::lock_guard<std::mutex> lock(expanderMutex);

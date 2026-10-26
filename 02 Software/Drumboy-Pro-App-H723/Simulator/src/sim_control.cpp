@@ -70,6 +70,8 @@ static std::map<std::string, std::string> snapshot() {
     v["tempo"] = std::to_string(controller.rhythm.tempo);
     v["layer"] = std::to_string(controller.selectedLayerNum);
     v["bank"] = std::to_string(controller.activeSongBank);
+    v["led.padsPlay"] = controller.ledLayerPlayMode ? "1" : "0";  // Pad LEDs follow playback (else show a selection)
+    v["led.padsData"] = std::to_string(controller.ledLayerPlayData);  // Pads the firmware wants lit
     unlockInterrupts();
 
     LcdInfo lcd = lcdInfo();
@@ -122,7 +124,7 @@ static const char* kHelp =
     "ok commands: "
     "press KEY[+KEY...] [hold_ms] | down KEY | up KEY | turn ENC(0-7) DETENTS | button | "
     "wait MS | wait-ready [timeout_ms] | wait-menu NAME [timeout_ms] | wait-stable [quiet_ms] [timeout_ms] | "
-    "screenshot PATH | record PATH MS | level [ms] | state | get FIELD | expect FIELD OP VALUE | keys | warnings | quit [code]";
+    "screenshot PATH | window-screenshot PATH | record PATH MS | level [ms] | state | get FIELD | expect FIELD OP VALUE | keys | warnings | quit [code]";
 
 static std::vector<std::string> split(const std::string& s, char sep) {
     std::vector<std::string> parts;
@@ -225,6 +227,12 @@ std::string runCommand(const std::string& line) {
         if (args.empty()) return "error usage: screenshot PATH";
         std::string path = outputPath(args[0]);
         return lcdScreenshot(path) ? "ok " + path : "error cannot write " + path;
+    }
+    if (cmd == "window-screenshot") {
+        if (args.empty()) return "error usage: window-screenshot PATH";
+        if (!windowActive()) return "error no window (start without --headless, or with --window)";
+        std::string path = outputPath(args[0]);
+        return windowScreenshot(path) ? "ok " + path : "error cannot write " + path;
     }
     if (cmd == "record") {
         if (args.size() < 2) return "error usage: record PATH MS";

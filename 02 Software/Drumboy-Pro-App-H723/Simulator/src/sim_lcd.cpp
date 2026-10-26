@@ -119,21 +119,37 @@ static void putChunk(std::vector<uint8_t>& out, const char* type, const std::vec
     putBe32(out, static_cast<uint32_t>(crc32(0, out.data() + start, static_cast<uInt>(out.size() - start))));
 }
 
+bool lcdCopyFrame(uint16_t* rgb565, uint16_t& w, uint16_t& h) {
+    w = width();
+    h = height();
+    for (uint16_t y = 0; y < h; y++) memcpy(rgb565 + y * w, framebuffer + y * kMaxSide, w * sizeof(uint16_t));
+    return lcd.displayOn && backlight;
+}
+
 bool lcdScreenshot(const std::string& path) {
     const uint16_t w = width(), h = height();
-    // Rows of RGB8 pixels, each with filter byte 0
-    std::vector<uint8_t> raw;
-    raw.reserve((w * 3 + 1) * h);
     bool lit = lcd.displayOn && backlight;
+    std::vector<uint8_t> rgb;
+    rgb.reserve(w * h * 3);
     for (uint16_t y = 0; y < h; y++) {
-        raw.push_back(0);
         for (uint16_t x = 0; x < w; x++) {
             uint16_t c = lit ? framebuffer[y * kMaxSide + x] : 0;
             uint8_t r = (c >> 11) & 0x1F, g = (c >> 5) & 0x3F, b = c & 0x1F;
-            raw.push_back(static_cast<uint8_t>((r << 3) | (r >> 2)));
-            raw.push_back(static_cast<uint8_t>((g << 2) | (g >> 4)));
-            raw.push_back(static_cast<uint8_t>((b << 3) | (b >> 2)));
+            rgb.push_back(static_cast<uint8_t>((r << 3) | (r >> 2)));
+            rgb.push_back(static_cast<uint8_t>((g << 2) | (g >> 4)));
+            rgb.push_back(static_cast<uint8_t>((b << 3) | (b >> 2)));
         }
+    }
+    return writePng(path, w, h, rgb.data());
+}
+
+bool writePng(const std::string& path, uint32_t w, uint32_t h, const uint8_t* rgb) {
+    // Rows of RGB8 pixels, each with filter byte 0
+    std::vector<uint8_t> raw;
+    raw.reserve((w * 3 + 1) * h);
+    for (uint32_t y = 0; y < h; y++) {
+        raw.push_back(0);
+        raw.insert(raw.end(), rgb + y * w * 3, rgb + (y + 1) * w * 3);
     }
 
     uLongf zsize = compressBound(static_cast<uLong>(raw.size()));

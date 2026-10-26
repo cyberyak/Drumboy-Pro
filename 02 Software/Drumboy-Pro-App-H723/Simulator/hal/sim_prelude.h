@@ -2,6 +2,7 @@
 
 #ifndef __SIM_PRELUDE_H
 #define __SIM_PRELUDE_H
+#ifndef SIM_NO_PRELUDE                                          // Set for sources that only use host libraries (sim_window.cpp)
 
 // The firmware places buffers in MCU RAM regions with
 // __attribute__((section(".RAM_D3"))) etc. Mach-O needs "segment,section"
@@ -45,4 +46,5 @@ int sim_sprintf(char* buffer, size_t size, const char* file, int line, const cha
 #undef sprintf
 #define sprintf(buffer, ...) sim_sprintf((buffer), __builtin_object_size((buffer), 1), __FILE__, __LINE__, __VA_ARGS__)
 
+#endif
 #endif

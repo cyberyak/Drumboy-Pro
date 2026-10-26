@@ -53,6 +53,23 @@ list(APPEND SIM_FIRMWARE_SOURCES
     ${FW_DIR}/FATFS/App/fatfs.c
 )
 
+# SDL3 for the panel window and sound, built from the release source as a static x86_64 library
+include(FetchContent)
+set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+set(SDL_STATIC ON CACHE BOOL "" FORCE)
+set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
+set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(SDL_TESTS OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(SDL3
+    URL https://github.com/libsdl-org/SDL/releases/download/release-3.2.10/SDL3-3.2.10.tar.gz
+    URL_HASH SHA256=f87be7b4dec66db4098e9c167b2aa34e2ca10aeb5443bdde95ae03185ed513e0
+    DOWNLOAD_EXTRACT_TIMESTAMP ON
+)
+FetchContent_MakeAvailable(SDL3)
+
+# Official panel drawing (MIT), rendered at run time
+get_filename_component(PANEL_ART "${FW_DIR}/../../01 Hardware/Drawing/Drumboy Pro Graphic.ai" ABSOLUTE)
+
 set(SIM_SOURCES
     src/sim_audio.cpp
     src/sim_control.cpp
@@ -66,6 +83,7 @@ set(SIM_SOURCES
     src/sim_memory.cpp
     src/sim_panel.cpp
     src/sim_timers.cpp
+    src/sim_window.cpp
 )
 
 add_executable(DrumboySim ${SIM_FIRMWARE_SOURCES} ${SIM_SOURCES})
@@ -116,4 +134,6 @@ set_source_files_properties(${SIM_FIRMWARE_SOURCES} PROPERTIES COMPILE_OPTIONS "
 set_source_files_properties(${FW_DIR}/Core/Src/main.cpp PROPERTIES COMPILE_DEFINITIONS "main=firmware_main")
 
 target_link_options(DrumboySim PRIVATE -Wl,-pagezero_size,0x1000)
-target_link_libraries(DrumboySim PRIVATE z)
+target_link_libraries(DrumboySim PRIVATE z SDL3::SDL3-static "-framework CoreGraphics" "-framework CoreFoundation")
+# sim_window.cpp only uses host libraries: no firmware prelude
+set_source_files_properties(src/sim_window.cpp PROPERTIES COMPILE_DEFINITIONS "SIM_NO_PRELUDE;DRUMBOY_PANEL_ART=\"${PANEL_ART}\"")

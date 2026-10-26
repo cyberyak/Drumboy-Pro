@@ -70,6 +70,8 @@ static void usage(const char* argv0) {
     printf("  --control SOCKET   accept commands on a Unix socket (Simulator/tools/simctl)\n");
     printf("  --run-ms N         stop after N ms; exit 0 if the firmware reached its main loop\n");
     printf("  --delay-scale F    multiply HAL_Delay by F (e.g. 0.1 skips most of the boot animation)\n");
+    printf("  --window           show the panel window (default unless --script or --run-ms is given)\n");
+    printf("  --headless         no window and no sound\n");
 }
 
 static bool parseArgs(int argc, char** argv) {
@@ -87,6 +89,10 @@ static bool parseArgs(int argc, char** argv) {
             sim::options.controlSocket = argv[++i];
         } else if (!strcmp(argv[i], "--run-ms") && hasValue) {
             sim::options.runMs = static_cast<uint32_t>(strtoul(argv[++i], nullptr, 10));
+        } else if (!strcmp(argv[i], "--window")) {
+            sim::options.window = 1;
+        } else if (!strcmp(argv[i], "--headless")) {
+            sim::options.window = 0;
         } else if (!strcmp(argv[i], "--delay-scale") && hasValue) {
             sim::options.delayScale = strtof(argv[++i], nullptr);
         } else {
@@ -134,6 +140,19 @@ int main(int argc, char** argv) {
     sim::startTimers();
     if (!sim::options.controlSocket.empty()) sim::startControlServer(sim::options.controlSocket);
     std::thread(firmware_main).detach();
+
+    bool window = sim::options.window == 1 || (sim::options.window == -1 && sim::options.script.empty() && !sim::options.runMs);
+    if (window) {
+        // The window needs the main thread (macOS); a script runs beside it
+        if (!sim::options.script.empty()) std::thread([] { sim::finish(sim::runScript(sim::options.script)); }).detach();
+        if (sim::options.runMs) {
+            std::thread([] {
+                std::this_thread::sleep_for(std::chrono::milliseconds(sim::options.runMs));
+                sim::finish(0);
+            }).detach();
+        }
+        sim::finish(sim::windowRun());
+    }
 
     if (!sim::options.script.empty()) {
         sim::finish(sim::runScript(sim::options.script));

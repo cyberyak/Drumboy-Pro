@@ -1,17 +1,44 @@
 # Drumboy Pro simulator
 
-Runs the real firmware on macOS, headless, so changes can be checked without flashing. Each run boots the firmware, then presses keys, turns encoders, takes LCD screenshots, records audio and checks state. You (or an AI assistant) drive it through a script or a socket. Jira epic DRUMB-29; a window and live audio/MIDI come later.
+Runs the real firmware on macOS so changes can be checked without flashing: as a visual panel you play with keyboard and mouse, or headless, driven by a script or a socket (by you or an AI assistant). Each run boots the firmware, then presses keys, turns encoders, takes screenshots, records audio and checks state. Jira epic DRUMB-29; MIDI comes later.
 
 ## Build
 
 ```sh
 export PATH="$HOME/Library/Application Support/stm32cube/bundles/cmake/4.4.0+st.1/CMake.app/Contents/bin:$HOME/Library/Application Support/stm32cube/bundles/ninja/1.13.2+st.1/bin:$PATH"
 cmake --preset Simulator
-cmake --build --preset Simulator          # -> build/Simulator/Simulator/DrumboySim
+cmake --build --preset Simulator          # -> build/Simulator/Simulator/DrumboySim (first build fetches SDL3)
 
 # SD card image from a folder with the card contents (once)
 Simulator/tools/make_card_image.sh ~/Projects/DrumBoy/sd-backup/2026-10-23 ~/Projects/DrumBoy/sim-card/drumboy.img
 ```
+
+## Window
+
+```sh
+Simulator/tools/run_sim.sh                # builds if needed, opens the panel on ~/Projects/DrumBoy/sim-card/drumboy.img
+Simulator/tools/run_sim.sh --card-copy    # same, but changes don't stay on the card image
+```
+
+The window shows the official panel drawing (`01 Hardware/Drawing/Drumboy Pro Graphic.ai`, rendered at the window's resolution) with the live LCD. Sound plays through the Mac's default output.
+
+- **Keys:** the Mac shortcut is printed in each key's bottom-right corner; clicking works too. A pressed key is highlighted, including presses from scripts and `simctl`.
+
+  | Keys | Shortcuts |
+  |---|---|
+  | RESET, PLAY/STOP, REC | delete, space, R |
+  | SELECT, UP, CLEAR / LEFT, GLOBAL, RIGHT / COPY, DOWN, PASTE | return, ↑, X / ←, esc, → / C, ↓, V |
+  | MUTE, FILL, STYLE; SONG (bottom left) | Q, W, E; tab |
+  | FILE, DRUMKIT, MIXER | F, D, M |
+  | RHYTHM, METRONOME, IO / FILTER 1, FILTER 2, EQ / EFFECT 1, EFFECT 2, REVERB | T, N, O / H, J, G / Y, U, B |
+  | LFO, LAYER INST, LAYER SONG; KNOB (bottom right) | L, I, S; K |
+  | Pads 1–10 | 1 … 9, 0 |
+
+- **Knobs:** drag left/right (or up/down), two-finger scroll over a knob, or hold ⌥ Option over a knob and move the pointer (the pointer stays put while Option is held). Knobs are numbered 1–8 (top row 1–4); `turn` uses 0–7.
+- **LEDs:** pads light from the firmware's pad LED expander (a voice playing), the side meters from the EQ LED expanders.
+- **Quit:** ⌘Q or close the window.
+
+SONG and KNOB are assigned to the bottom-left and bottom-right keys by keypad wiring; swap them in `src/sim_window.cpp` if the device disagrees.
 
 ## Test
 
@@ -45,13 +72,14 @@ One per line in a script, or one per argument to `simctl`. Each command replies 
 | `button` | Function button (test mode) |
 | `wait MS`, `wait-ready`, `wait-menu NAME`, `wait-stable [quiet_ms]` | Waits: fixed time, main loop reached, menu shown, screen unchanged for quiet_ms |
 | `screenshot PATH` | LCD as PNG (960×540) |
+| `window-screenshot PATH` | Whole panel window as PNG (with the window open) |
 | `record PATH MS`, `level [MS]` | Audio output as WAV (44.1 kHz, int32 stereo); peak/RMS in dBFS |
 | `state`, `get FIELD` | JSON: menu, play, record, tempo, layer, bank, alert, lcd.*, audio.*, leds |
 | `expect FIELD OP VALUE` | Assertion, OP is `== != < <= > >=` (`expect menu == RHYTHM`) |
 | `warnings` | Firmware problems detected at run time (see below) |
 | `quit [code]` | Exit |
 
-Options: `--card IMAGE`, `--card-copy`, `--script FILE` (or `-` for stdin), `--control SOCKET`, `--out DIR`, `--run-ms N`, `--delay-scale F`. A scale below 1 shortens `HAL_Delay`, mostly the boot animation (boot takes ~2.5 s at 0.2, ~9 s at 1).
+Options: `--card IMAGE`, `--card-copy`, `--script FILE` (or `-` for stdin), `--control SOCKET`, `--out DIR`, `--run-ms N`, `--delay-scale F`, `--window` / `--headless`. The window opens unless `--script` or `--run-ms` is given, and `--window` shows it while a script runs. A scale below 1 shortens `HAL_Delay`, mostly the boot animation (boot takes ~2.5 s at 0.2, ~9 s at 1).
 
 ### Firmware problems it reports
 
@@ -70,8 +98,8 @@ The application (`Core/Library`, `Core/Plugin`, `main.cpp`), the CubeMX init fil
 | SDRAM, RAM_D3, peripheral and core registers | memory mapped at the same addresses (`src/sim_memory.cpp`) |
 | Interrupts | timer thread (`src/sim_timers.cpp`), audio clock, panel events. ISRs run under one interrupt lock that `__disable_irq` also takes |
 | LCD (NT35516, 16-bit 8080 bus) | `SimReg32` GPIO proxies (`hal/stm32h7xx.h`) feed a bus decoder (`src/sim_gpio.cpp`, `src/sim_lcd.cpp`) |
-| Keys, encoders, LEDs (6 × MCP23017, EXTI) | expander register model + EXTI (`src/sim_panel.cpp`) |
-| Audio (I2S DMA, SGTL5000) | 44.1 kHz thread calling the DMA half/full callbacks, 60 s history (`src/sim_audio.cpp`) |
+| Keys, encoders, LEDs (6 × MCP23017, EXTI) | expander register model + EXTI (`src/sim_panel.cpp`); panel window with SDL3 (`src/sim_window.cpp`) |
+| Audio (I2S DMA, SGTL5000) | 44.1 kHz thread calling the DMA half/full callbacks, 60 s history (`src/sim_audio.cpp`), SDL3 playback |
 | SD card (`sd_diskio.c`) | FatFs on a raw card image (`src/sim_diskio.cpp`) |
 | `main()` | compiled as `firmware_main()` and run on its own thread (`src/sim_main.cpp`) |
 

@@ -33,6 +33,10 @@ static std::atomic<uint64_t> blocks(0);
 
 uint64_t audioBlocks() { return blocks; }
 
+static std::atomic<void (*)(const int32_t*, uint32_t)> outputSink(nullptr);
+
+void audioSetOutput(void (*output)(const int32_t* frames, uint32_t count)) { outputSink = output; }
+
 static void storeBlock(const uint32_t* half) {
     std::lock_guard<std::mutex> lock(historyMutex);
     for (uint32_t i = 0; i < I2S_BLOCK_SIZE; i++) {
@@ -41,6 +45,8 @@ static void storeBlock(const uint32_t* half) {
         history[pos * 2 + 1] = static_cast<int32_t>(half[i * 2 + 1]);
         framesWritten++;
     }
+    auto sink = outputSink.load();
+    if (sink) sink(reinterpret_cast<const int32_t*>(half), I2S_BLOCK_SIZE);
 }
 
 void audioStart() {

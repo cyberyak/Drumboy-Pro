@@ -17,6 +17,7 @@ struct Options {
     std::string script;                                         // Command file to run, "-" = stdin
     std::string controlSocket;                                  // Unix socket for simctl
     float delayScale = 1.0f;                                    // HAL_Delay multiplier (< 1 boots faster)
+    int window = -1;                                            // 1 = panel window, 0 = headless, -1 = window unless scripted
     uint32_t runMs = 0;                                         // Stop after this time, 0 = run forever
 };
 
@@ -56,12 +57,23 @@ struct LcdInfo {
 LcdInfo lcdInfo();
 bool lcdScreenshot(const std::string& path);                    // PNG, as the screen is seen
 uint32_t lcdChecksum();                                         // Changes when the image changes
+bool lcdCopyFrame(uint16_t* rgb565, uint16_t& width, uint16_t& height);  // Visible image (960x540 max); false = dark
+bool writePng(const std::string& path, uint32_t width, uint32_t height, const uint8_t* rgb);
+
+// Window (sim_window.cpp)
+int windowRun();                                                // Main thread; returns when the window closes
+bool windowScreenshot(const std::string& path);                 // PNG of the whole window (waits for a frame)
+bool windowActive();
 
 // Front panel (sim_panel.cpp)
 bool panelI2cRead(bool bus4, uint8_t address, uint8_t reg, uint8_t* data, uint16_t size);
 void panelI2cWrite(bool bus4, uint8_t address, uint8_t reg, const uint8_t* data, uint16_t size);
 bool panelKey(const std::string& name, bool down);              // false = unknown key
-void panelTurn(int encoder, int detents);
+void panelTurn(int encoder, int detents);                       // Blocks while the edges play out
+void panelTurnAsync(int encoder, int detents);                  // Queued, for the window
+int panelKnobPosition(int encoder);                             // Detents turned since start
+uint16_t panelKeypadInputs(int keypad);                         // 0 left, 1 right, 2 layer pads; bit low = pressed
+uint16_t panelLedOutputs(uint8_t address7);                     // LED expander outputs (0x22 pads, 0x23/0x24 EQ)
 void panelFuncButton(bool down);
 std::vector<std::string> panelKeyNames();
 std::string panelLedsJson();
@@ -74,6 +86,7 @@ struct AudioLevel {
 AudioLevel audioLevel(uint32_t ms);                             // Most recent ms of output
 bool audioRecord(const std::string& path, uint32_t ms);         // Blocks while recording, writes a WAV
 uint64_t audioBlocks();
+void audioSetOutput(void (*output)(const int32_t* frames, uint32_t count));  // Live playback (window)
 
 // Firmware problems found at run time (sim_libc.cpp)
 void warn(const std::string& site, const std::string& message);  // Reported once per site
