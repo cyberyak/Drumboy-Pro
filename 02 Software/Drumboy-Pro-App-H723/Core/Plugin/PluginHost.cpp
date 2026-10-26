@@ -341,13 +341,14 @@ void pluginHost_update(Controller& controller) {
     RGB16Color fore = lcd.getForeColor();
     RGB16Color back = lcd.getBackColor();
 
-    if (generator_needsFrame()) {
+    if (generator_ownsStrip()) {
         generator_frame(controller);  // Owns the top strip while open (plugin lines and messages wait)
     } else {
         for (uint8_t i = 0; i < pluginCount; i++) {
             if (pluginRunning[i] && plugins[i]->isActive()) plugins[i]->onFrame(lcd);
         }
         drawMessage(lcd);
+        if (generator_needsFrame()) generator_frame(controller);  // Lanes restored after a File load
     }
     manager_frame(controller);
 

@@ -16,6 +16,7 @@ class Controller;
 void generator_initialize();
 bool generator_isOpen();
 bool generator_needsFrame();
+bool generator_ownsStrip();                                             // Open or clearing: plugin lines and messages wait
 bool generator_keyPasses(uint8_t keypad, uint8_t key);
 bool generator_handleEvent(const PluginEvent& event, Controller& controller);  // True if the event was used
 void generator_frame(Controller& controller);
