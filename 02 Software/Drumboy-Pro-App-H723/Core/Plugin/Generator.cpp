@@ -104,6 +104,7 @@ static uint8_t historyBack = 0;                                         // 0 = n
 
 static bool open = false;
 static bool clearPending = false;
+static uint16_t lanesToRedraw = 0;                                      // Tracks restored by a File load (bit per track)
 static bool fillHeld = false;
 static bool dirty = false;
 static uint32_t lastDrawTick = 0;
@@ -680,6 +681,7 @@ static void loadBlock(FIL& file, const char* path, bool songLoaded) {
         for (uint8_t b = 0; b < kBankLibrarySize; b++) {
             if (touched[t] & (1u << b)) restoreTiming(c, t, b);
         }
+        if (touched[t]) lanesToRedraw |= (1u << t);  // The loader drew these lanes before the restore
     }
 }
 
@@ -709,6 +711,10 @@ bool generator_isOpen() {
 }
 
 bool generator_needsFrame() {
+    return open || clearPending || lanesToRedraw;
+}
+
+bool generator_ownsStrip() {
     return open || clearPending;
 }
 
@@ -827,6 +833,13 @@ void generator_frame(Controller& c) {
         c.lcd.clearRect(kGenTextX, kGenLine1Y - 1, kGenTextWidth, 19);
         drawMarker(c.lcd, markerRow, false);
         markerRow = 0xFF;
+    }
+    // Lanes of tracks restored after a File load (the manager / show mode restore lanes themselves)
+    if (lanesToRedraw && !pluginHost_isScreenCaptured()) {
+        for (uint8_t t = 0; t < kGenTracks; t++) {
+            if (lanesToRedraw & (1u << t)) PluginAccess::drawSong(c, t, PluginAccess::activeBank(c));
+        }
+        lanesToRedraw = 0;
     }
 }
 
