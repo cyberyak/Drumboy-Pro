@@ -10,6 +10,33 @@ Custom Drumboy Pro firmware by cyberyak (fork of [Randomwaves/Drumboy-Pro](https
 
 ## [Unreleased]
 
+## [1.01-cy.3]
+
+Plugin & Firmware Manager.
+
+### Added
+- **Plugin & Firmware Manager**: in the File menu, press FILE again. It draws in the song lanes (restored on close) and owns keys and knobs while open; the sequencer keeps playing. Not available while recording.
+- **Plugins page**: every built-in and Lua plugin with ON/OFF and RUNNING state; CENTER toggles; changes are written to `Plugins/plugins.txt` on close and apply after a restart.
+- **Firmware page**: lists valid update files in a `Firmware/` folder on the SD card (e.g. stock 1.01 and cyberyak builds). CENTER twice copies the selected file to the SD root with a CRC check and restarts, so the bootloader installs it; the library copy is kept.
+- Releases also attach the official stock package, so the `Firmware/` library can be filled from one release.
+
+### Changed
+- Plugin host takes the Controller (instead of its FIL) and separates "configured" from "running" plugins.
+- Controller gains two read-only getters (`getActiveSongBank`, `isRecording`); stock keyboard/encoder dispatch and `lcd_update()` pause while the manager is open.
+
+## [1.01-cy.2]
+
+Lua script plugins.
+
+### Added
+- **Lua 5.4 plugins**: every `Plugins/*.lua` file on the SD card is a plugin, enabled in `plugins.txt` like the built-ins. Callbacks `on_load`, `on_step`, `on_note`, `on_key`, `on_encoder`, `on_midi_in`, `on_midi_out`, `on_frame`; API `screen.*`, `sys.millis/memory`, `print`. Reference: `Plugins/README.md`.
+- Sandbox: no `io`/`os`/`require`/`load`/bytecode; per-script limits of 48 KB memory and 2 ms per event / 10 ms per frame / 300 ms to load. Errors stop only that script and are shown in red in the top strip; `print()` output is shown there too.
+- Lua heap: 96 KB in DTCM (memory the stock firmware never used); about 20 KB per typical script.
+- Example plugins `hello.lua` (template with every callback) and `step_dots.lua` (16 step dots in the top-right corner).
+- `DRUMBOY_LUA` build option (on by default).
+
+Cost versus 1.01-cy.1: +136 KB flash (Lua engine and float formatting), +2 KB main RAM.
+
 ## [1.01-cy.1]
 
 First custom release, based on Randomwaves 1.01: a plugin-capable firmware with two built-in plugins. With no plugins enabled it behaves exactly like stock, apart from the build label.

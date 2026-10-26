@@ -76,7 +76,7 @@ int main() {
         controller.update();
         PROFILE_LOOP_END();
         if ((controller.getMenu() != INIT_MENU) && (controller.getMenu() != TEST_MENU)) {
-            PLUGIN_UPDATE(controller.lcd);
+            PLUGIN_UPDATE(controller);
             BRANDING_DRAW(controller.lcd, controller.getMenu() == FILE_MENU);
         }
     }

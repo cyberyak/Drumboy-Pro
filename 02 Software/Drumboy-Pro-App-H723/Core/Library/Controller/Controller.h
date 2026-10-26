@@ -311,6 +311,8 @@ class Controller {
     Io     getIo()    { return io; }                                    // Get MIDI/Sync state
     Mixer  getMixer() { return mixer; }                                 // Get Master audio levels
     Menu   getMenu()  { return menu; }                                  // Get currently active UI screen
+    uint8_t getActiveSongBank() { return activeSongBank; }              // Plugin manager: restore song lanes
+    bool   isRecording() { return recordActive; }                       // Plugin manager: refuse to open while recording
 
     TestMode testMode;                                                  // Current hardware diagnostic sub-mode
 
