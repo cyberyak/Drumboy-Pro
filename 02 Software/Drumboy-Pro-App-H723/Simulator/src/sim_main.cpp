@@ -39,6 +39,7 @@ void finish(int code) {
 void restart() {
     printf("sim: system reset\n");
     fflush(stdout);
+    if (!options.controlSocket.empty()) unlink(options.controlSocket.c_str());
     char path[4096];
     uint32_t size = sizeof(path);
     if (_NSGetExecutablePath(path, &size) == 0) execv(path, savedArgv);

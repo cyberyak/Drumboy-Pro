@@ -44,8 +44,8 @@ def main(argv):
     for command in commands:
         sock.sendall((command + "\n").encode())
         reply = reader.readline().rstrip("\n")
-        if not reply and command.split()[0] == "quit":
-            reply = "ok"                                    # The simulator exits without replying
+        if not reply and command.split()[0] in ("quit", "restart"):
+            reply = "ok"                                    # The simulator exits / re-execs without replying
         print(reply)
         failed |= reply.startswith("error")
     return 1 if failed else 0

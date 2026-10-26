@@ -5,6 +5,8 @@
 // The image is a byte-for-byte copy of a card: `dd` of the real card or one
 // made by Simulator/tools/make_card_image.sh.
 
+#include <fcntl.h>
+
 #include <cstdio>
 #include <mutex>
 #include <string>
@@ -24,6 +26,7 @@ bool cardOpen(const std::string& path) {
     std::lock_guard<std::mutex> lock(cardMutex);
     card = fopen(path.c_str(), "r+b");
     if (!card) return false;
+    fcntl(fileno(card), F_SETFD, FD_CLOEXEC);
     fseeko(card, 0, SEEK_END);
     cardSectors = static_cast<uint32_t>(ftello(card) / kSectorSize);
     // SD detect is active low

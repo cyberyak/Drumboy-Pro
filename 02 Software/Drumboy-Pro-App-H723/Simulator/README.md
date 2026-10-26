@@ -36,7 +36,7 @@ The window shows the official panel drawing (`01 Hardware/Drawing/Drumboy Pro Gr
 
 - **Knobs:** drag left/right (or up/down), two-finger scroll over a knob, or hold ⌥ Option over a knob and move the pointer (the pointer stays put while Option is held). Knobs are numbered 1–8 (top row 1–4); `turn` uses 0–7.
 - **LEDs:** pads light from the firmware's pad LED expander (a voice playing), the side meters from the EQ LED expanders.
-- **Quit:** ⌘Q or close the window.
+- **Power cycle:** ⌘R (needed after switching plugins in the manager). **Quit:** ⌘Q or close the window.
 
 SONG and KNOB are assigned to the bottom-left and bottom-right keys by keypad wiring; swap them in `src/sim_window.cpp` if the device disagrees.
 
@@ -77,6 +77,7 @@ One per line in a script, or one per argument to `simctl`. Each command replies 
 | `state`, `get FIELD` | JSON: menu, play, record, tempo, layer, bank, alert, lcd.*, audio.*, leds |
 | `expect FIELD OP VALUE` | Assertion, OP is `== != < <= > >=` (`expect menu == RHYTHM`) |
 | `warnings` | Firmware problems detected at run time (see below) |
+| `restart` | Power cycle (re-exec on the same card, e.g. after switching plugins) |
 | `quit [code]` | Exit |
 
 Options: `--card IMAGE`, `--card-copy`, `--script FILE` (or `-` for stdin), `--control SOCKET`, `--out DIR`, `--run-ms N`, `--delay-scale F`, `--window` / `--headless`. The window opens unless `--script` or `--run-ms` is given, and `--window` shows it while a script runs. A scale below 1 shortens `HAL_Delay`, mostly the boot animation (boot takes ~2.5 s at 0.2, ~9 s at 1).

@@ -119,6 +119,7 @@ target_compile_options(DrumboySim PRIVATE
     -include ${CMAKE_CURRENT_SOURCE_DIR}/hal/sim_prelude.h
     -O2 -g -ffast-math
     -fno-strict-aliasing                        # register/buffer type punning as on the MCU
+    -fshort-enums                               # as arm-none-eabi: enums are 1 byte (KEYSTATE arrays, file formats)
     -Wno-unused-parameter -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable
 )
 # Firmware sources: no warnings, and no stack protector by default, like the
@@ -136,4 +137,7 @@ set_source_files_properties(${FW_DIR}/Core/Src/main.cpp PROPERTIES COMPILE_DEFIN
 target_link_options(DrumboySim PRIVATE -Wl,-pagezero_size,0x1000)
 target_link_libraries(DrumboySim PRIVATE z SDL3::SDL3-static "-framework CoreGraphics" "-framework CoreFoundation")
 # sim_window.cpp only uses host libraries: no firmware prelude
-set_source_files_properties(src/sim_window.cpp PROPERTIES COMPILE_DEFINITIONS "SIM_NO_PRELUDE;DRUMBOY_PANEL_ART=\"${PANEL_ART}\"")
+set_source_files_properties(src/sim_window.cpp PROPERTIES
+    COMPILE_DEFINITIONS "SIM_NO_PRELUDE;DRUMBOY_PANEL_ART=\"${PANEL_ART}\""
+    COMPILE_OPTIONS "-fno-short-enums"          # host ABI for SDL; shares no enum types with the firmware
+)

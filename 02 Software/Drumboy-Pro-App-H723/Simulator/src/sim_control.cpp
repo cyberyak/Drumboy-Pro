@@ -5,6 +5,7 @@
 // a one-line reply starting with "ok" or "error"; `state` replies with JSON.
 // `help` lists the commands.
 
+#include <fcntl.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -28,6 +29,8 @@
 #include "Controller.h"
 #undef private
 
+#include "Manager.h"
+#include "Plugin.h"
 #include "sim.h"
 
 extern Controller controller;
@@ -72,6 +75,20 @@ static std::map<std::string, std::string> snapshot() {
     v["bank"] = std::to_string(controller.activeSongBank);
     v["led.padsPlay"] = controller.ledLayerPlayMode ? "1" : "0";  // Pad LEDs follow playback (else show a selection)
     v["led.padsData"] = std::to_string(controller.ledLayerPlayData);  // Pads the firmware wants lit
+    v["keys.active"] = controller.keyboardActive ? "1" : "0";
+    v["keys.left"] = std::to_string(controller.keyboard.keyLeft.previousState);  // Last scanned state, bit low = pressed
+    v["keys.right"] = std::to_string(controller.keyboard.keyRight.previousState);
+    v["keys.pending"] = std::to_string(controller.keyboard.keyLayer.read | controller.keyboard.keyLeft.read << 1 | controller.keyboard.keyRight.read << 2);
+#ifdef DRUMBOY_PLUGINS
+    v["manager"] = manager_isOpen() ? "1" : "0";
+    v["plugins.dropped"] = std::to_string(pluginHost_getDroppedEvents());
+    for (uint8_t i = 0; i < 8; i++) {
+        Plugin* plugin = pluginHost_getPlugin(i);
+        if (!plugin) break;
+        std::string key = std::string("plugin.") + plugin->id();
+        v[key] = std::string(pluginHost_isRunning(i) ? "running" : "off") + (pluginHost_isConfigured(i) ? ",on" : ",off");
+    }
+#endif
     unlockInterrupts();
 
     LcdInfo lcd = lcdInfo();
@@ -124,7 +141,7 @@ static const char* kHelp =
     "ok commands: "
     "press KEY[+KEY...] [hold_ms] | down KEY | up KEY | turn ENC(0-7) DETENTS | button | "
     "wait MS | wait-ready [timeout_ms] | wait-menu NAME [timeout_ms] | wait-stable [quiet_ms] [timeout_ms] | "
-    "screenshot PATH | window-screenshot PATH | record PATH MS | level [ms] | state | get FIELD | expect FIELD OP VALUE | keys | warnings | quit [code]";
+    "screenshot PATH | window-screenshot PATH | record PATH MS | level [ms] | state | get FIELD | expect FIELD OP VALUE | keys | warnings | restart | quit [code]";
 
 static std::vector<std::string> split(const std::string& s, char sep) {
     std::vector<std::string> parts;
@@ -265,6 +282,7 @@ std::string runCommand(const std::string& line) {
         if (compare(it->second, args[1], args[2])) return "ok " + args[0] + " = " + it->second;
         return "error expected " + args[0] + " " + args[1] + " " + args[2] + ", got " + it->second;
     }
+    if (cmd == "restart") restart();                             // Power cycle: re-exec on the same card
     if (cmd == "quit") finish(static_cast<int>(num(0, 0)));
     return "error unknown command " + cmd + " (try `help`)";
 }
@@ -317,6 +335,7 @@ static void serveClient(int fd) {
 
 void startControlServer(const std::string& path) {
     int server = socket(AF_UNIX, SOCK_STREAM, 0);
+    fcntl(server, F_SETFD, FD_CLOEXEC);                         // A restart (exec) must not inherit the sockets
     sockaddr_un addr{};
     addr.sun_family = AF_UNIX;
     if (path.size() >= sizeof(addr.sun_path)) {
@@ -333,7 +352,9 @@ void startControlServer(const std::string& path) {
     std::thread([server] {
         while (true) {
             int client = accept(server, nullptr, nullptr);
-            if (client >= 0) std::thread(serveClient, client).detach();
+            if (client < 0) continue;
+            fcntl(client, F_SETFD, FD_CLOEXEC);
+            std::thread(serveClient, client).detach();
         }
     }).detach();
 }

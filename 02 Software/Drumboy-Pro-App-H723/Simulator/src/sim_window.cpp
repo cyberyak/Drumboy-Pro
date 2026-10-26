@@ -337,7 +337,7 @@ static void drawPanel(SDL_Renderer* r, SDL_Texture* art, SDL_Texture* lcd, int a
     }
 
     text(r, 12, 10,
-         "Keys: shortcut in each key's corner, or click.  Knobs: drag left/right, scroll, or hold Option over a knob and move.",
+         "Keys: shortcut in each key's corner, or click.  Knobs: drag, scroll, or hold Option and move.  Cmd-R: power cycle.",
          {170, 170, 170, 255});
 }
 
@@ -409,6 +409,11 @@ int windowRun() {
                         running = false;
                         break;
                     }
+                    if ((e.key.mod & SDL_KMOD_GUI) && e.key.scancode == SDL_SCANCODE_R && down) {
+                        SDL_Quit();
+                        restart();                              // Power cycle (e.g. after switching plugins)
+                    }
+                    if (e.key.mod & SDL_KMOD_GUI) break;         // Other Cmd shortcuts are not panel keys
                     if (e.key.scancode == SDL_SCANCODE_LALT || e.key.scancode == SDL_SCANCODE_RALT) {
                         if (down && dragKnob < 0) {
                             float mx, my, ux, uy;
