@@ -7,7 +7,9 @@
 
 cmake_minimum_required(VERSION 3.22)
 
-if(NOT CMAKE_TOOLCHAIN_FILE)
+option(DRUMBOY_SIMULATOR "Build the desktop simulator (Simulator/) instead of the firmware" OFF)
+
+if(NOT CMAKE_TOOLCHAIN_FILE AND NOT DRUMBOY_SIMULATOR)
     set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/arm-none-eabi.cmake")
 endif()
 if(NOT CMAKE_BUILD_TYPE)
@@ -55,16 +57,21 @@ set(FW_PACKAGE "Drumboy_Pro_Fw_0${FW_VERSION_MAJOR}_${_MINOR2}_cy${_BUILD2}.bin"
 file(WRITE "${CMAKE_BINARY_DIR}/version.txt" "${FW_VERSION}\n")
 message(STATUS "Drumboy Pro firmware ${FW_VERSION} -> ${FW_PACKAGE}")
 
+option(DRUMBOY_PLUGINS "Plugin host, hooks and built-in plugins (Core/Plugin), enabled via Plugins/plugins.txt" ON)
+option(DRUMBOY_BRANDING "Show the custom build label (CYBERYAK <version>) on screen" ON)
+
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_EXTENSIONS ON)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_EXTENSIONS ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-set(MCU_FLAGS -mcpu=cortex-m7 -mfpu=fpv5-d16 -mfloat-abi=hard -mthumb)
+if(DRUMBOY_SIMULATOR)
+    add_subdirectory(Simulator)
+    return()
+endif()
 
-option(DRUMBOY_PLUGINS "Plugin host, hooks and built-in plugins (Core/Plugin), enabled via Plugins/plugins.txt" ON)
-option(DRUMBOY_BRANDING "Show the custom build label (CYBERYAK <version>) on screen" ON)
+set(MCU_FLAGS -mcpu=cortex-m7 -mfpu=fpv5-d16 -mfloat-abi=hard -mthumb)
 
 file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS
     Core/*.c Core/*.cpp Core/*.s
