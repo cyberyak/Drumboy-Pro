@@ -52,6 +52,8 @@ extern "C" TIM_HandleTypeDef htim23;                                    // Beat 
 extern "C" TIM_HandleTypeDef htim24;                                    // Limit alert timer
 
 class Controller {
+    friend struct PluginAccess;  // Plugin host (Core/Plugin): pattern generator access to song banks
+
    private:
     /* Core System Modules --------------------------------------- */
 

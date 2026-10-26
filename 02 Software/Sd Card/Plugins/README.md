@@ -16,6 +16,35 @@ Press **FILE** to open the File menu, then press **FILE** again. The manager app
 
 While the manager is open the sequencer keeps playing, but the other keys and knobs are paused. It does not open while recording.
 
+## Pattern generator
+
+Hold **FILL** and press **STYLE** (from any menu) to open the generator. It writes new drum patterns into the **current song bank**; nothing is stored on the SD card until you use **File → SAVE** (reload the file, or press CLEAR here, to get the old pattern back). The song lanes stay visible and update as you generate; PLAY/STOP and RESET keep working.
+
+Each track gets a role from its instrument folder (Kick, Snare, HHClosed, Cowbell, …), or keywords in user sample names (`kick`, `ohh`, `808`, `conga`, …), or the usual role of its track number.
+
+| Control | Does |
+|---|---|
+| Knob 1 STYLE | TECHNO, ELECTRO, BREAKBEAT |
+| Knob 2 DENSITY | How many steps play |
+| Knob 3 VARIATION | How much each bar differs |
+| Knob 4 SWING | 50 (straight) – 75 |
+| Knob 5 HUMANIZE | Timing spread off the grid |
+| Knob 6 DYNAMICS | Accents vs ghost notes |
+| Knob 7 PROBABILITY | How many steps play less than 100% of the time |
+| Knob 8 RATCHET | Chance of ratchets / rolls |
+| **GLOBAL** | Generate all unlocked tracks |
+| **PASTE** | New random seed, then generate |
+| **CLEAR** | Undo the last generation |
+| **UP / DOWN** or a layer key | Select a track |
+| **SELECT** | Lock / unlock the selected track (locked tracks are kept) |
+| **COPY** | Change the selected track's role (AUTO → KICK → SNARE → …) |
+| **LEFT / RIGHT** | Phrase fill: off / every 2 / 4 / 8 bars |
+| **FILE** (or FILL + STYLE) | Close |
+
+Beat ticks are coloured by probability: track colour = always, **green** ≥ 70%, **yellow** ≥ 45%, **orange** ≥ 20%, **red** below. Ratchets use the stock fills, so the generator switches a track's **F** on when it gets ratchets.
+
+Probability and velocity per step are kept in memory while the Drumboy is on; after saving and reloading a file the generated beats are still there but play at full probability and velocity (saving those values comes later).
+
 ## Built-in plugins
 
 | Name | What it does |

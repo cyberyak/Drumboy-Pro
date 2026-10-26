@@ -10,6 +10,24 @@ Custom Drumboy Pro firmware by cyberyak (fork of [Randomwaves/Drumboy-Pro](https
 
 ## [Unreleased]
 
+## [1.01-cy.6]
+
+Pattern generator.
+
+### Added
+- **Pattern generator**: hold FILL + press STYLE. Generates TECHNO, ELECTRO or BREAKBEAT patterns into the current song bank (kept in memory until File → SAVE; CLEAR undoes).
+- **Track roles** from the instrument folder (factory library: Kick, Snare, Clap, Snap, Rim, HHClosed, HHOpen, Ride, Crash, Tom, Perc, Shaker, Tambourine, Conga, Bongo, Cowbell, Clave, Bass, Fx), keywords in user sample names, or the track number; per-track role override and lock.
+- **Algorithm**: per style and role a 16-step weight map (density threshold), Euclidean overlays, percussion that fills the gaps left by kick/snare, a fixed per-seed groove plus per-bar variation, phrase fills (snare rolls, tom runs, kick drops, crash after the fill, open hat at the bar end), swing, humanize, accent/ghost dynamics, per-step probability and ratchets; trimmed to the stock 64-beat / 32-fill limits per track.
+- **Per-step probability and velocity**, applied just before each beat plays; beat ticks are coloured by probability.
+- Parameters shown in the top strip while the generator is open; the song lanes keep updating and PLAY/STOP/RESET keep working.
+
+### Changed
+- Plugin input capture split into input (manager, show mode, generator) and screen (manager, show mode); transport keys can pass through.
+- Controller: `friend struct PluginAccess` for the generator; hooks for beat probability/velocity and beat colour (compiled out in Stock builds).
+
+### Notes
+- Upstream bug spotted: `layerSong_resetAllBeats()` contains `(menu = LAYER_SONG_MENU)` (assignment instead of comparison), so clearing the selected track can switch the screen to the Layer Song menu. The generator avoids that function.
+
 ## [1.01-cy.5]
 
 Lua removed: native plugins only.

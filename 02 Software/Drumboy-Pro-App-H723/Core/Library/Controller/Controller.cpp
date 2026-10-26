@@ -368,7 +368,7 @@ void Controller::update() {
         led_action();
 
         // Push buffered graphical changes to the LCD.
-        if (!PLUGIN_INPUT_CAPTURED()) lcd_update();
+        if (!PLUGIN_SCREEN_CAPTURED()) lcd_update();
 
         // 4. FILESYSTEM MAINTENANCE
         // Recover SD subsystem if media access is lost.
@@ -1561,9 +1561,9 @@ void Controller::keyboard_action() {
         if (PLUGIN_INPUT_CAPTURED()) {
             // Presses belong to the plugin page; releases still reach the stock UI so held modifiers clear.
             for (uint8_t i = 0; i < 16; i++) {
-                if (keyboard.keyLayer.changeState[i] == KEYSTATE_PRESS) keyboard.keyLayer.changeState[i] = KEYSTATE_NONE;
-                if (keyboard.keyLeft.changeState[i] == KEYSTATE_PRESS) keyboard.keyLeft.changeState[i] = KEYSTATE_NONE;
-                if (keyboard.keyRight.changeState[i] == KEYSTATE_PRESS) keyboard.keyRight.changeState[i] = KEYSTATE_NONE;
+                if ((keyboard.keyLayer.changeState[i] == KEYSTATE_PRESS) && !PLUGIN_KEY_PASSES(0, i)) keyboard.keyLayer.changeState[i] = KEYSTATE_NONE;
+                if ((keyboard.keyLeft.changeState[i] == KEYSTATE_PRESS) && !PLUGIN_KEY_PASSES(1, i)) keyboard.keyLeft.changeState[i] = KEYSTATE_NONE;
+                if ((keyboard.keyRight.changeState[i] == KEYSTATE_PRESS) && !PLUGIN_KEY_PASSES(2, i)) keyboard.keyRight.changeState[i] = KEYSTATE_NONE;
             }
         }
 
@@ -12559,6 +12559,7 @@ void Controller::lcd_drawBeat(uint8_t layerNum_, uint8_t bankNum_, uint8_t beatN
             lcd.setForeColor(kBeatSelectedColor);
         } else {
             (layerNum_ == selectedLayerNum) ? lcd.setForeColor(kLayerSelectedColor) : lcd.setForeColor(kLayerColorPalette[layerNum_]);
+            PLUGIN_BEAT_COLOR(lcd, layerNum_, bankNum_, beatNum_, beat.getStartInterval());
         }
 
         // 3. BEAT SHAPE RENDER
@@ -23448,6 +23449,7 @@ void Controller::interruptPlay() {
                                         break;  // MUTED: 0% velocity
                                 }
                             }
+                            PLUGIN_BEAT_GATE(layer.number, activeSongBank, playBeatNum, beat.getStartInterval(), fillVolMultiplier);
                             if (fillVolMultiplier > 0.0f) layer_playBeat(layer.number, fillVolMultiplier);
 
                             // Advance to the next beat index
@@ -23464,6 +23466,7 @@ void Controller::interruptPlay() {
                         if (beatMicro.getInterval() == playInterval) {
                             if ((!layer.mute) && (layer.samplePlay) && ((playBeatMicroNum == 0) || ((playBeatMicroNum != 0) && (layer.fill)))) {
                                 fillVolMultiplier = kNumberDataLibrary[beatMicro.getLevel()].powMultiplier;
+                                PLUGIN_BEAT_GATE(layer.number, activeSongBank, playBeatNum, beat.getStartInterval(), fillVolMultiplier);
                                 if (fillVolMultiplier > 0.0f) layer_playBeat(layer.number, fillVolMultiplier);
                             }
 

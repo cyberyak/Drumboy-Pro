@@ -6,6 +6,7 @@
 #include <strings.h>
 
 #include "Controller.h"
+#include "Generator.h"
 #include "Manager.h"
 
 // clang-format off
@@ -235,6 +236,7 @@ void pluginHost_initialize(Controller& controller) {
 
     FIL& file = controller.sd.file;
     controller.keyboard_disable();
+    generator_initialize();
 
     // 1. DISCOVER
     registerBuiltinPlugins();
@@ -253,7 +255,15 @@ void pluginHost_initialize(Controller& controller) {
 }
 
 bool pluginHost_isCapturing() {
-    return manager_isOpen();
+    return manager_isOpen() || generator_isOpen();
+}
+
+bool pluginHost_isScreenCaptured() {
+    return manager_isOpen();  // Manager page and show mode draw over the lanes/rows; the generator doesn't
+}
+
+bool pluginHost_keyPassesThrough(uint8_t keypad, uint8_t key) {
+    return generator_keyPasses(keypad, key);
 }
 
 /* Events -----------------------------------------------------------*/
@@ -307,7 +317,8 @@ void pluginHost_update(Controller& controller) {
         PluginEvent event = queue[queueTail];
         queueTail = (queueTail + 1) & (kPluginQueueSize - 1);
 
-        if (manager_handleEvent(event, controller)) continue;  // Keys/knobs used by the open manager
+        if (generator_handleEvent(event, controller)) continue;  // Keys/knobs used by the generator page
+        if (manager_handleEvent(event, controller)) continue;    // Keys/knobs used by the open manager
 
         for (uint8_t i = 0; i < pluginCount; i++) {
             if (pluginRunning[i] && plugins[i]->isActive()) plugins[i]->onEvent(event);
@@ -316,7 +327,7 @@ void pluginHost_update(Controller& controller) {
     manager_endUpdate(controller);
 
     // 2. FRAME
-    if ((runningCount == 0) && !manager_isOpen() && !manager_needsFrame() && !messagePending && !messageShown) return;
+    if ((runningCount == 0) && !manager_needsFrame() && !generator_needsFrame() && !messagePending && !messageShown) return;
     uint32_t tick = HAL_GetTick();
     if ((tick - lastFrameTick) < kPluginFrameInterval) return;
     lastFrameTick = tick;
@@ -330,11 +341,15 @@ void pluginHost_update(Controller& controller) {
     RGB16Color fore = lcd.getForeColor();
     RGB16Color back = lcd.getBackColor();
 
-    for (uint8_t i = 0; i < pluginCount; i++) {
-        if (pluginRunning[i] && plugins[i]->isActive()) plugins[i]->onFrame(lcd);
+    if (generator_needsFrame()) {
+        generator_frame(controller);  // Owns the top strip while open (plugin lines and messages wait)
+    } else {
+        for (uint8_t i = 0; i < pluginCount; i++) {
+            if (pluginRunning[i] && plugins[i]->isActive()) plugins[i]->onFrame(lcd);
+        }
+        drawMessage(lcd);
     }
     manager_frame(controller);
-    drawMessage(lcd);
 
     lcd.setFont(font);
     lcd.setSpacing(spacing);
