@@ -29,6 +29,7 @@
 #include "Controller.h"
 #undef private
 
+#include "Generator.h"
 #include "Manager.h"
 #include "Plugin.h"
 #include "sim.h"
@@ -79,7 +80,46 @@ static std::map<std::string, std::string> snapshot() {
     v["keys.left"] = std::to_string(controller.keyboard.keyLeft.previousState);  // Last scanned state, bit low = pressed
     v["keys.right"] = std::to_string(controller.keyboard.keyRight.previousState);
     v["keys.pending"] = std::to_string(controller.keyboard.keyLayer.read | controller.keyboard.keyLeft.read << 1 | controller.keyboard.keyRight.read << 2);
+    // Modifier keys the firmware thinks are held (stuck flags show up here)
+    const auto& kb = controller.keyboard;
+    std::string held;
+    const std::pair<const char*, bool> mods[] = {{"MUTE", kb.muteKeyPress},       {"FILL", kb.fillKeyPress},     {"STYLE", kb.styleKeyPress},
+                                                 {"LAYER_INST", kb.layerInstKeyPress}, {"LAYER_SONG", kb.layerSongKeyPress}, {"LFO", kb.lfoKeyPress},
+                                                 {"BANK", kb.bankKeyPress},       {"KNOB", kb.encKeyPress},      {"SELECT", kb.shiftKeyPress}};
+    for (const auto& m : mods) {
+        if (m.second) held += std::string(held.empty() ? "" : ",") + m.first;
+    }
+    v["keys.held"] = held.empty() ? "none" : held;
+
+    // Current song bank: active beats per track, F (fill) and M (mute) per track
+    std::string beats, fills, mutes, hashes;
+    for (int i = 0; i < kLayerLibrarySize; i++) {
+        const Layer& layer = controller.layerLibrary[i];
+        int n = 0;
+        uint32_t hash = 2166136261u;                            // Beat contents, to see any change (EVOLVE, re-roll, lock)
+        auto mix = [&hash](uint32_t v) { hash = (hash ^ v) * 16777619u; };
+        for (const Beat& b : layer.bankLibrary[controller.activeSongBank].beatLibrary) {
+            n += b.getActive() ? 1 : 0;
+            if (b.getActive()) {
+                mix(b.data);
+                mix(b.startInterval);
+                mix(b.endInterval);
+                mix(b.fillTarget);
+            }
+        }
+        char hex[12];
+        snprintf(hex, sizeof(hex), "%04x", (hash ^ (hash >> 16)) & 0xFFFF);
+        hashes += (i ? "," : "") + std::string(hex);
+        beats += (i ? "," : "") + std::to_string(n);
+        fills += layer.fill ? "1" : "0";
+        mutes += layer.mute ? "1" : "0";
+    }
+    v["song.beats"] = beats;
+    v["song.hash"] = hashes;
+    v["song.fills"] = fills;
+    v["song.mutes"] = mutes;
 #ifdef DRUMBOY_PLUGINS
+    v["generator"] = generator_isOpen() ? "1" : "0";
     v["manager"] = manager_isOpen() ? "1" : "0";
     v["plugins.dropped"] = std::to_string(pluginHost_getDroppedEvents());
     for (uint8_t i = 0; i < 8; i++) {
@@ -111,7 +151,12 @@ static std::string stateJson() {
     out << "{";
     bool first = true;
     for (const auto& kv : snapshot()) {
-        bool number = !kv.second.empty() && (isdigit(static_cast<unsigned char>(kv.second[0])) || kv.second[0] == '-');
+        char* end = nullptr;
+        strtod(kv.second.c_str(), &end);
+        const std::string& t = kv.second;
+        size_t d = (t[0] == '-') ? 1 : 0;
+        bool leadingZero = t.size() > d + 1 && t[d] == '0' && isdigit(static_cast<unsigned char>(t[d + 1]));
+        bool number = !t.empty() && *end == '\0' && !leadingZero;  // JSON numbers have no leading zeros
         out << (first ? "" : ", ") << "\"" << kv.first << "\": " << (number ? kv.second : "\"" + kv.second + "\"");
         first = false;
     }
@@ -141,7 +186,7 @@ static const char* kHelp =
     "ok commands: "
     "press KEY[+KEY...] [hold_ms] | down KEY | up KEY | turn ENC(0-7) DETENTS | button | "
     "wait MS | wait-ready [timeout_ms] | wait-menu NAME [timeout_ms] | wait-stable [quiet_ms] [timeout_ms] | "
-    "screenshot PATH | window-screenshot PATH | record PATH MS | level [ms] | state | get FIELD | expect FIELD OP VALUE | keys | warnings | restart | quit [code]";
+    "screenshot PATH | window-screenshot PATH | record PATH MS | level [ms] | state | get FIELD | dump-track N | expect FIELD OP VALUE | keys | warnings | restart | quit [code]";
 
 static std::vector<std::string> split(const std::string& s, char sep) {
     std::vector<std::string> parts;
@@ -263,6 +308,26 @@ std::string runCommand(const std::string& line) {
         return buf;
     }
     if (cmd == "state") return "ok " + stateJson();
+    if (cmd == "dump-track") {
+        // Raw beats of one track in the current bank: start-end/type.pattern.time.level/fill target
+        int t = atoi(arg(0, "1").c_str()) - 1;
+        if (t < 0 || t >= kLayerLibrarySize) return "error track 1-10";
+        lockInterrupts();
+        const Bank& bank = controller.layerLibrary[t].bankLibrary[controller.activeSongBank];
+        std::string out = "ok";
+        for (const Beat& b : bank.beatLibrary) {
+            if (!b.getActive()) continue;
+            char item[48];
+            snprintf(item, sizeof(item), " %u-%u/%u.%u.%u.%u", b.startInterval, b.endInterval, b.getFillType(), b.getFillPattern(), b.getFillTime(),
+                     b.getFillLevel());
+            out += item;
+            if (b.getFillTarget() != NULL_FILL_TARGET) out += "/f" + std::to_string(b.getFillTarget());
+        }
+        int fills = 0;
+        for (const BeatFill& f : bank.beatFillLibrary) fills += f.getActive() ? 1 : 0;
+        unlockInterrupts();
+        return out + " | fills " + std::to_string(fills);
+    }
     if (cmd == "warnings") {
         std::vector<std::string> list = warnings();
         std::string out = "ok " + std::to_string(list.size());
