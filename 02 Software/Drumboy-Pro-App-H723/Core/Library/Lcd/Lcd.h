@@ -84,6 +84,21 @@ class Lcd {
     void setAlignment(LcdAlign align_) { fontAlignment = align_; }
     LcdAlign getAlignment() const { return fontAlignment; }
 
+    /* Pixel Streaming (plugins) --------------------------------- */
+    // Set a window once, then push all of its pixels left to right, top to bottom
+    // (same bus sequence as fastFill, one colour per pixel). Always end with endStream().
+
+    void beginStream(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1) {
+        setAddressWindow(x0, y0, x1, y1);
+        LCD_CS_LOW;
+    }
+    ALWAYSINLINE void streamPixel(RGB16Color color) {
+        LCD_DATA_GPIO_Port->ODR = color;
+        LCD_WR_GPIO_Port->BSRR = (uint32_t)LCD_WR_Pin << 16U;           // Low
+        LCD_WR_GPIO_Port->BSRR = (uint32_t)LCD_WR_Pin;                  // High
+    }
+    void endStream() { LCD_CS_HIGH; }
+
     /* Core Display Functions ------------------------------------ */
 
     void initialize();
