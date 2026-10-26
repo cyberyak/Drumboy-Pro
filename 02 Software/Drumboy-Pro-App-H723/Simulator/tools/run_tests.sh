@@ -3,7 +3,8 @@
 #
 #   run_tests.sh [card image] [test.sim ...]
 #
-# Defaults: ~/Projects/DrumBoy/sim-card/drumboy.img and Simulator/tests/*.sim.
+# Defaults: ~/Projects/DrumBoy/sim-card/test.img (made once from the SD card
+# backup, kept separate from the card you play with) and Simulator/tests/*.sim.
 # Output (log, screenshots, recordings) goes to build/Simulator/test-output/<test>/.
 # Exit status is the number of failed tests.
 
@@ -11,7 +12,12 @@ set -u
 SIM_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 FW_DIR="$(dirname "$SIM_DIR")"
 BIN="$FW_DIR/build/Simulator/Simulator/DrumboySim"
-CARD="${1:-$HOME/Projects/DrumBoy/sim-card/drumboy.img}"
+CARD="${1:-$HOME/Projects/DrumBoy/sim-card/test.img}"
+BACKUP="${DRUMBOY_SD_BACKUP:-$HOME/Projects/DrumBoy/sd-backup/2026-10-23}"
+if [ ! -f "$CARD" ]; then
+    echo "Creating test card $CARD from $BACKUP"
+    "$SIM_DIR/tools/make_card_image.sh" "$BACKUP" "$CARD" >/dev/null || exit 100
+fi
 shift $(( $# > 0 ? 1 : 0 ))
 TESTS=("$@")
 [ ${#TESTS[@]} -eq 0 ] && TESTS=("$SIM_DIR"/tests/*.sim)

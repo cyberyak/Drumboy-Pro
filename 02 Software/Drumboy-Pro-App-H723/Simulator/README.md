@@ -46,7 +46,7 @@ SONG and KNOB are assigned to the bottom-left and bottom-right keys by keypad wi
 Simulator/tools/run_tests.sh              # every Simulator/tests/*.sim, prints PASS/FAIL
 ```
 
-Each test runs on a throwaway clone of the card image (`--card-copy`), so saved presets don't leak into the next run. The log, screenshots and WAVs go to `build/Simulator/test-output/<test>/`.
+Tests use their own card, `~/Projects/DrumBoy/sim-card/test.img` (made from the SD backup on first run, so your playing card's plugins and files don't affect results), and each test runs on a throwaway clone of it (`--card-copy`). The log, screenshots and WAVs go to `build/Simulator/test-output/<test>/`.
 
 ### Interactive (step by step, e.g. from an AI session)
 
