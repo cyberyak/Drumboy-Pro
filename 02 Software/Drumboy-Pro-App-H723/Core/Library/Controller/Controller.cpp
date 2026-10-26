@@ -368,7 +368,7 @@ void Controller::update() {
         led_action();
 
         // Push buffered graphical changes to the LCD.
-        lcd_update();
+        if (!PLUGIN_SCREEN_CAPTURED()) lcd_update();
 
         // 4. FILESYSTEM MAINTENANCE
         // Recover SD subsystem if media access is lost.
@@ -1558,6 +1558,14 @@ void Controller::keyboard_action() {
         if (keyboard.keyLayer.read) PLUGIN_KEYPAD(0, keyboard.keyLayer.changeState, kLayerLibrarySize);
         if (keyboard.keyLeft.read) PLUGIN_KEYPAD(1, keyboard.keyLeft.changeState, 16);
         if (keyboard.keyRight.read) PLUGIN_KEYPAD(2, keyboard.keyRight.changeState, 16);
+        if (PLUGIN_INPUT_CAPTURED()) {
+            // Presses belong to the plugin page; releases still reach the stock UI so held modifiers clear.
+            for (uint8_t i = 0; i < 16; i++) {
+                if ((keyboard.keyLayer.changeState[i] == KEYSTATE_PRESS) && !PLUGIN_KEY_PASSES(0, i)) keyboard.keyLayer.changeState[i] = KEYSTATE_NONE;
+                if ((keyboard.keyLeft.changeState[i] == KEYSTATE_PRESS) && !PLUGIN_KEY_PASSES(1, i)) keyboard.keyLeft.changeState[i] = KEYSTATE_NONE;
+                if ((keyboard.keyRight.changeState[i] == KEYSTATE_PRESS) && !PLUGIN_KEY_PASSES(2, i)) keyboard.keyRight.changeState[i] = KEYSTATE_NONE;
+            }
+        }
 
         // 2. LAYER KEYPAD DISPATCH
         if (keyboard.keyLayer.read) {
@@ -3030,6 +3038,7 @@ void Controller::encoder_read() {
                         else if (res == ENC_RES_M)
                             res = ENC_RES_F;
                     }
+                    res = PLUGIN_ENCODER_RESOLUTION(res);
 
                     // 5. ACTION EMISSION
                     if (direction == 1) {  // CW
@@ -3074,6 +3083,7 @@ void Controller::encoder_action() {
             // Process only events promoted by encoder_read().
             if (enc.read) {
                 PLUGIN_EVENT(PLUGIN_EVENT_ENCODER, encNum_, (enc.actionCurrent == ENC_INC) ? 1 : -1, 0);
+                if (PLUGIN_INPUT_CAPTURED()) enc.actionCurrent = ENC_NONE;
                 switch (enc.mode) {
                         // --- LOCAL MODE ---
                         // Use menu-bound function mapping.
@@ -5835,6 +5845,7 @@ SdResult Controller::sd_loadFile(uint8_t fileNum_) {
             result = SD_OK;
         }
         f_close(&sd.file);
+        PLUGIN_FILE_LOADED(sd.file, fileName, phaseCheck[1]);  // Reads the extension block, if any
     }
 
     // 8. INPUT RESTORATION
@@ -6105,6 +6116,7 @@ SdResult Controller::sd_saveFile(uint8_t fileNum_) {
                 if (errorCount == 0) {
                     if (f_write(&sd.file, eof, strlen(eof), &sd.byteswritten) == FR_OK) {
                         result = SD_OK;
+                        PLUGIN_FILE_SAVE(sd.file);  // Extension block after the stock EOF (stock loaders ignore it)
                     }
                 }
             }
@@ -12550,6 +12562,7 @@ void Controller::lcd_drawBeat(uint8_t layerNum_, uint8_t bankNum_, uint8_t beatN
             lcd.setForeColor(kBeatSelectedColor);
         } else {
             (layerNum_ == selectedLayerNum) ? lcd.setForeColor(kLayerSelectedColor) : lcd.setForeColor(kLayerColorPalette[layerNum_]);
+            PLUGIN_BEAT_COLOR(lcd, layerNum_, bankNum_, beatNum_, beat.getStartInterval());
         }
 
         // 3. BEAT SHAPE RENDER
@@ -23439,6 +23452,7 @@ void Controller::interruptPlay() {
                                         break;  // MUTED: 0% velocity
                                 }
                             }
+                            PLUGIN_BEAT_GATE(layer.number, activeSongBank, playBeatNum, beat.getStartInterval(), fillVolMultiplier);
                             if (fillVolMultiplier > 0.0f) layer_playBeat(layer.number, fillVolMultiplier);
 
                             // Advance to the next beat index
@@ -23455,6 +23469,7 @@ void Controller::interruptPlay() {
                         if (beatMicro.getInterval() == playInterval) {
                             if ((!layer.mute) && (layer.samplePlay) && ((playBeatMicroNum == 0) || ((playBeatMicroNum != 0) && (layer.fill)))) {
                                 fillVolMultiplier = kNumberDataLibrary[beatMicro.getLevel()].powMultiplier;
+                                PLUGIN_BEAT_GATE(layer.number, activeSongBank, playBeatNum, beat.getStartInterval(), fillVolMultiplier);
                                 if (fillVolMultiplier > 0.0f) layer_playBeat(layer.number, fillVolMultiplier);
                             }
 

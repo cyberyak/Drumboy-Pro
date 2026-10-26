@@ -92,6 +92,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     Core/Plugin
 )
 
+
 target_compile_definitions(${PROJECT_NAME} PRIVATE
     USE_PWR_LDO_SUPPLY
     USE_HAL_DRIVER

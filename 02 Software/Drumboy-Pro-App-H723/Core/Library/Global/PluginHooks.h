@@ -35,25 +35,63 @@ struct PluginEvent {
 
 #include "ff.h"
 
+class Controller;
 class Lcd;
 
-void pluginHost_initialize(FIL& file);
-void pluginHost_update(Lcd& lcd);
+void pluginHost_initialize(Controller& controller);
+void pluginHost_update(Controller& controller);
 void pluginHost_push(PluginEventType type, uint8_t a, uint8_t b, uint8_t c);
 void pluginHost_pushKeypad(uint8_t keypad, const uint8_t* changeState, uint8_t count);
+bool pluginHost_isCapturing();
+bool pluginHost_isScreenCaptured();
+bool pluginHost_keyPassesThrough(uint8_t keypad, uint8_t key);
+void pluginHost_audioTap(const uint32_t* interleaved, uint16_t frames);
+void pluginHost_beatGate(uint8_t layer, uint8_t bank, uint8_t beatNum, uint16_t startInterval, float& volume);
+void pluginHost_beatColor(Lcd& lcd, uint8_t layer, uint8_t bank, uint8_t beatNum, uint16_t startInterval);
+void pluginHost_fileSaved(FIL& file);
+void pluginHost_fileLoaded(FIL& file, const char* path, bool songLoaded);
 
-// Reads Plugins/plugins.txt, so it takes the same keypad lock the controller uses around SD access.
-#define PLUGIN_INIT(controller_)                    do { (controller_).keyboard_disable(); pluginHost_initialize((controller_).sd.file); (controller_).keyboard_enable(); } while (0)
-#define PLUGIN_UPDATE(lcd_)                         pluginHost_update(lcd_)
+// Knobs on plugin pages (generator, manager, show mode): the stock page underneath may set its bottom
+// knobs to the slow on/off resolution (6 steps), which made generator knobs 5-8 need 3x more turning.
+const uint8_t kPluginEncoderResolution = 2;                     // = ENC_RES_F, as the stock value knobs
+
+#define PLUGIN_INIT(controller_)                    pluginHost_initialize(controller_)
+#define PLUGIN_UPDATE(controller_)                  pluginHost_update(controller_)
 #define PLUGIN_EVENT(type_, a_, b_, c_)             pluginHost_push((type_), (uint8_t)(a_), (uint8_t)(b_), (uint8_t)(c_))
 #define PLUGIN_KEYPAD(keypad_, states_, count_)     pluginHost_pushKeypad((keypad_), (const uint8_t*)(states_), (count_))
+// True while a plugin page (manager, show mode, generator) owns key presses and knobs.
+#define PLUGIN_INPUT_CAPTURED()                     pluginHost_isCapturing()
+// True while a plugin page also owns the screen area of the song lanes / track rows; lcd_update() pauses.
+#define PLUGIN_SCREEN_CAPTURED()                    pluginHost_isScreenCaptured()
+// Key presses that still reach the stock UI while input is captured (e.g. transport in the generator).
+#define PLUGIN_KEY_PASSES(keypad_, key_)            pluginHost_keyPassesThrough((keypad_), (key_))
+// Knob resolution (quadrature steps per event): plugin pages use one fine resolution for all knobs.
+#define PLUGIN_ENCODER_RESOLUTION(res_)             (pluginHost_isCapturing() ? kPluginEncoderResolution : (res_))
+// Output level/bass/treble peaks for visual plugins; called in the I2S interrupt after each block (~200 flops).
+#define PLUGIN_AUDIO_TAP(buffer_, frames_)          pluginHost_audioTap((buffer_), (frames_))
+// Generated steps: per-step probability roll and velocity, just before a beat plays (play-timer interrupt).
+#define PLUGIN_BEAT_GATE(layer_, bank_, beat_, start_, volume_) pluginHost_beatGate((layer_), (bank_), (beat_), (start_), (volume_))
+// Generated steps: beat tick colour by probability (lcd_drawBeat, non-selected beats).
+#define PLUGIN_BEAT_COLOR(lcd_, layer_, bank_, beat_, start_)   pluginHost_beatColor((lcd_), (layer_), (bank_), (beat_), (start_))
+// Files: append / read the cyberyak extension block (generator data) after the stock EOF marker.
+#define PLUGIN_FILE_SAVE(file_)                     pluginHost_fileSaved(file_)
+#define PLUGIN_FILE_LOADED(file_, path_, ok_)       pluginHost_fileLoaded((file_), (path_), (ok_))
 
 #else
 
 #define PLUGIN_INIT(controller_)                    ((void)0)
-#define PLUGIN_UPDATE(lcd_)                         ((void)0)
+#define PLUGIN_UPDATE(controller_)                  ((void)0)
 #define PLUGIN_EVENT(type_, a_, b_, c_)             ((void)0)
 #define PLUGIN_KEYPAD(keypad_, states_, count_)     ((void)0)
+#define PLUGIN_INPUT_CAPTURED()                     (false)
+#define PLUGIN_SCREEN_CAPTURED()                    (false)
+#define PLUGIN_KEY_PASSES(keypad_, key_)            (true)
+#define PLUGIN_ENCODER_RESOLUTION(res_)             (res_)
+#define PLUGIN_AUDIO_TAP(buffer_, frames_)          ((void)0)
+#define PLUGIN_BEAT_GATE(layer_, bank_, beat_, start_, volume_) ((void)0)
+#define PLUGIN_BEAT_COLOR(lcd_, layer_, bank_, beat_, start_)   ((void)0)
+#define PLUGIN_FILE_SAVE(file_)                     ((void)0)
+#define PLUGIN_FILE_LOADED(file_, path_, ok_)       ((void)0)
 
 #endif
 

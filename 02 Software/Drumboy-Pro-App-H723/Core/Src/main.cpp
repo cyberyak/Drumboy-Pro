@@ -76,7 +76,7 @@ int main() {
         controller.update();
         PROFILE_LOOP_END();
         if ((controller.getMenu() != INIT_MENU) && (controller.getMenu() != TEST_MENU)) {
-            PLUGIN_UPDATE(controller.lcd);
+            PLUGIN_UPDATE(controller);
             BRANDING_DRAW(controller.lcd, controller.getMenu() == FILE_MENU);
         }
     }
@@ -301,6 +301,7 @@ void HAL_I2SEx_TxRxHalfCpltCallback(I2S_HandleTypeDef* hi2s) {
         PROFILE_AUDIO_BEGIN();
         controller.processAudioBlock(&i2s_rxBuffer[0], &i2s_txBuffer[0]);
         PROFILE_AUDIO_END();
+        PLUGIN_AUDIO_TAP(&i2s_txBuffer[0], I2S_BLOCK_SIZE);
     }
 }
 
@@ -310,6 +311,7 @@ void HAL_I2SEx_TxRxCpltCallback(I2S_HandleTypeDef* hi2s) {
         PROFILE_AUDIO_BEGIN();
         controller.processAudioBlock(&i2s_rxBuffer[I2S_BLOCK_SIZE * 2], &i2s_txBuffer[I2S_BLOCK_SIZE * 2]);
         PROFILE_AUDIO_END();
+        PLUGIN_AUDIO_TAP(&i2s_txBuffer[I2S_BLOCK_SIZE * 2], I2S_BLOCK_SIZE);
     }
 }
 

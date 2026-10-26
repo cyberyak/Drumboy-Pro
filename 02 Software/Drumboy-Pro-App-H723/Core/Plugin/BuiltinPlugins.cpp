@@ -8,10 +8,12 @@
 
 Plugin* builtin_cpuMeter();
 Plugin* builtin_hookMonitor();
+Plugin* builtin_psychedelic();
 
 void registerBuiltinPlugins() {
     pluginHost_register(builtin_cpuMeter());
     pluginHost_register(builtin_hookMonitor());
+    pluginHost_register(builtin_psychedelic());
 }
 
 #endif
