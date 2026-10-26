@@ -37,7 +37,7 @@ class Plugin {
     virtual void onEvent(const PluginEvent& event) { (void)event; }    // Called once per queued event
     virtual void onFrame(Lcd& lcd) { (void)lcd; }                      // Called at kPluginFrameInterval
 
-    // Show mode: the plugin owns the show canvas (started from the manager with ADD, ended with FILE).
+    // Show mode: the plugin owns the show canvas (started from the manager with SELECT, ended with FILE).
     // While showing, it also receives the keys and knobs the stock UI would otherwise get.
     virtual bool canShow() const { return false; }
     virtual void onShowStart() {}

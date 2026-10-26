@@ -1,6 +1,6 @@
 # Drumboy Pro plugins
 
-Copy this folder to the SD card as `Plugins/`. Enable plugins in `plugins.txt` (`name = on`) and power-cycle the Drumboy.
+Copy this folder to the SD card as `Plugins/`. Full documentation: `docs/README.md` in the [GitHub repository](https://github.com/cyberyak/Drumboy-Pro/tree/dev/docs). Enable plugins in `plugins.txt` (`name = on`) and power-cycle the Drumboy.
 
 ## Plugin & Firmware Manager (on the device)
 

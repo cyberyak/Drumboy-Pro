@@ -1,5 +1,7 @@
 # Drumboy Pro
 
+> **cyberyak fork:** custom firmware with plugins, a pattern generator and visuals — see [docs/README.md](docs/README.md) and [CHANGELOG.md](CHANGELOG.md).
+
 📖 **[Developer Wiki](https://www.randomwaves.io/drumboy-pro/drumboy-pro-wiki.html)** — full hardware specs, schematics walkthrough, firmware architecture, DSP internals, and memory map.
 
 **An open-source hardware groovebox** — sequencer, sampler, and DSP effects engine built around an STM32H723 (Cortex-M7 @ 550 MHz), with a 540×960 touch-free color display, 42 keys, 8 rotary encoders, and full MIDI/Sync I/O.
