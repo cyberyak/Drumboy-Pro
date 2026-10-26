@@ -9,11 +9,13 @@
 Plugin* builtin_cpuMeter();
 Plugin* builtin_hookMonitor();
 Plugin* builtin_psychedelic();
+Plugin* builtin_keyStepFx();
 
 void registerBuiltinPlugins() {
     pluginHost_register(builtin_cpuMeter());
     pluginHost_register(builtin_hookMonitor());
     pluginHost_register(builtin_psychedelic());
+    pluginHost_register(builtin_keyStepFx());
 }
 
 #endif

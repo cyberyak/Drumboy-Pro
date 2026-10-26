@@ -13,6 +13,7 @@ What it adds:
 | CPU Meter plugin | `cpu_meter = on` | [CpuMeter.md](../02%20Software/Drumboy-Pro-App-H723/Core/Plugin/CpuMeter.md) |
 | Hook Monitor plugin | `hook_monitor = on` | [HookMonitor.md](../02%20Software/Drumboy-Pro-App-H723/Core/Plugin/HookMonitor.md) |
 | Psychedelic visualizer | `psychedelic = on`, then show mode | [Psychedelic.md](../02%20Software/Drumboy-Pro-App-H723/Core/Plugin/Psychedelic.md) |
+| KeyStep FX (in progress) | `keystep_fx = on`; KeyStep Pro into MIDI In | [KeyStepFx.md](../02%20Software/Drumboy-Pro-App-H723/Core/Plugin/KeyStepFx.md) |
 
 Release history: [CHANGELOG.md](../CHANGELOG.md). Task board: Jira project DRUMB.
 
@@ -59,6 +60,7 @@ Firmware/
 cpu_meter = off        # Audio and main-loop CPU load (green line, top-left)
 hook_monitor = off     # Developer view of step/note/key/encoder/MIDI events (cyan line)
 psychedelic = off      # Full-screen evolving psychedelic visuals (show mode: manager -> SELECT)
+keystep_fx = off       # MIDI processor for a KeyStep Pro on MIDI In: owns channels 1-5, merges them into MIDI Out
 ```
 
 Changes apply after a restart. A missing file, or a plugin not listed, means off. The generator and the manager are part of the firmware and always available.

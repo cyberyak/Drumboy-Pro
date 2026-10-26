@@ -5,3 +5,4 @@
 cpu_meter = off        # Audio and main-loop CPU load (green line, top-left)
 hook_monitor = off     # Developer view of step/note/key/encoder/MIDI events (cyan line)
 psychedelic = off      # Full-screen evolving psychedelic visuals (show mode: manager -> SELECT)
+keystep_fx = off       # MIDI processor for a KeyStep Pro on MIDI In: owns channels 1-5, merges them into MIDI Out

@@ -50,6 +50,7 @@ void pluginHost_beatGate(uint8_t layer, uint8_t bank, uint8_t beatNum, uint16_t 
 void pluginHost_beatColor(Lcd& lcd, uint8_t layer, uint8_t bank, uint8_t beatNum, uint16_t startInterval);
 void pluginHost_fileSaved(FIL& file);
 void pluginHost_fileLoaded(FIL& file, const char* path, bool songLoaded);
+bool pluginHost_midiRx(uint8_t byte);
 
 #define PLUGIN_INIT(controller_)                    pluginHost_initialize(controller_)
 #define PLUGIN_UPDATE(controller_)                  pluginHost_update(controller_)
@@ -70,6 +71,8 @@ void pluginHost_fileLoaded(FIL& file, const char* path, bool songLoaded);
 // Files: append / read the cyberyak extension block (generator data) after the stock EOF marker.
 #define PLUGIN_FILE_SAVE(file_)                     pluginHost_fileSaved(file_)
 #define PLUGIN_FILE_LOADED(file_, path_, ok_)       pluginHost_fileLoaded((file_), (path_), (ok_))
+// MIDI-in split (UART RX interrupt, every byte): true = a plugin owns the byte and the stock parser skips it.
+#define PLUGIN_MIDI_RX(byte_)                       pluginHost_midiRx(byte_)
 
 #else
 
@@ -85,6 +88,7 @@ void pluginHost_fileLoaded(FIL& file, const char* path, bool songLoaded);
 #define PLUGIN_BEAT_COLOR(lcd_, layer_, bank_, beat_, start_)   ((void)0)
 #define PLUGIN_FILE_SAVE(file_)                     ((void)0)
 #define PLUGIN_FILE_LOADED(file_, path_, ok_)       ((void)0)
+#define PLUGIN_MIDI_RX(byte_)                       (false)
 
 #endif
 

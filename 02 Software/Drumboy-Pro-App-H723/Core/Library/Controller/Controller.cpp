@@ -1093,6 +1093,10 @@ void Controller::receiveMidiCommand() {
     /// Real-time system bytes (0xF8–0xFF) are dispatched immediately without
     /// interrupting the running channel-message state machines.
 
+    // 0. PLUGIN MIDI SPLIT
+    // Bytes of channels a plugin owns (KeyStep FX) never reach the stock parser, whatever the MIDI-IN mode.
+    if (PLUGIN_MIDI_RX(midiRxData)) return;
+
     // 1. RX ACTIVITY CHECK
     // Continue parsing only when MIDI RX engine is enabled.
     if (!io.midi.rxActive) return;
