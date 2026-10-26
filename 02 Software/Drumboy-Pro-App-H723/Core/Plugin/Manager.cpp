@@ -485,7 +485,7 @@ bool manager_handleEvent(const PluginEvent& e, Controller& controller) {
 }
 
 void manager_frame(Controller& controller) {
-    // 1. SHOW MODE (ends by itself if the plugin failed, e.g. a Lua error)
+    // 1. SHOW MODE (ends by itself if the plugin stopped)
     if ((showPlugin != nullptr) && !showPlugin->isActive()) endShow();
     if (showPlugin != nullptr) {
         if (showClearPending) {

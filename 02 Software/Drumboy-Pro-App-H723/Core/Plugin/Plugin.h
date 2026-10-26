@@ -22,7 +22,7 @@ const uint16_t kShowHeight                          = 310;              // 10 ro
 // clang-format on
 
 /* Plugin Interface -------------------------------------------------*/
-// Built-in (compiled-in) plugins and Lua scripts implement this interface.
+// Built-in (compiled-in) plugins implement this interface.
 // All methods run in the main loop, never in interrupt context.
 // Disabled plugins receive no calls at all.
 

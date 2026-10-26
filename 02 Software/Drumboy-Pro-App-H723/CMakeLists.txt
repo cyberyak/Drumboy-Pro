@@ -65,7 +65,6 @@ set(MCU_FLAGS -mcpu=cortex-m7 -mfpu=fpv5-d16 -mfloat-abi=hard -mthumb)
 
 option(DRUMBOY_PLUGINS "Plugin host, hooks and built-in plugins (Core/Plugin), enabled via Plugins/plugins.txt" ON)
 option(DRUMBOY_BRANDING "Show the custom build label (CYBERYAK <version>) on screen" ON)
-option(DRUMBOY_LUA "Lua script plugins from Plugins/*.lua (needs DRUMBOY_PLUGINS)" ON)
 
 file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS
     Core/*.c Core/*.cpp Core/*.s
@@ -93,17 +92,6 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     Core/Plugin
 )
 
-# Lua (ThirdParty/Lua, outside the CubeIDE source folders): only compiled when enabled, so the
-# Stock build stays identical. 32-bit numbers, bounded C-stack depth, and IEEE-exact float math
-# (no -ffast-math, which breaks Lua's NaN/infinity and float-to-int rules).
-if(DRUMBOY_PLUGINS AND DRUMBOY_LUA)
-    file(GLOB LUA_SOURCES CONFIGURE_DEPENDS ThirdParty/Lua/src/*.c)
-    set_source_files_properties(${LUA_SOURCES} PROPERTIES COMPILE_OPTIONS "-w;-O2;-fno-fast-math")
-    target_sources(${PROJECT_NAME} PRIVATE ${LUA_SOURCES})
-    target_include_directories(${PROJECT_NAME} PRIVATE ThirdParty/Lua/src)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE DRUMBOY_LUA LUA_32BITS=1 LUAI_MAXCCALLS=64)
-    target_link_options(${PROJECT_NAME} PRIVATE "SHELL:-u _printf_float")  # Lua formats numbers with %g
-endif()
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE
     USE_PWR_LDO_SUPPLY

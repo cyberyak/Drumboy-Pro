@@ -10,6 +10,16 @@ Custom Drumboy Pro firmware by cyberyak (fork of [Randomwaves/Drumboy-Pro](https
 
 ## [Unreleased]
 
+## [1.01-cy.5]
+
+Lua removed: native plugins only.
+
+### Removed
+- Lua 5.4 runtime, Lua plugin layer, the `hello`, `step_dots` and `fractal` scripts and the Lua documentation. Native plugins proved faster and simpler; `psychedelic` replaces the Lua fractal. Frees ~140 KB flash and the 96 KB Lua heap in DTCM.
+
+### Fixed
+- While the manager or a show plugin owns the keys, key **releases** now still reach the stock UI (only presses are captured), so modifier keys held while opening (e.g. FILL) no longer stay stuck.
+
 ## [1.01-cy.4]
 
 Show mode and an audio-reactive fractal visualizer.

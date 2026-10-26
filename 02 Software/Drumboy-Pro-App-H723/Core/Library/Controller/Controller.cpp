@@ -1559,10 +1559,12 @@ void Controller::keyboard_action() {
         if (keyboard.keyLeft.read) PLUGIN_KEYPAD(1, keyboard.keyLeft.changeState, 16);
         if (keyboard.keyRight.read) PLUGIN_KEYPAD(2, keyboard.keyRight.changeState, 16);
         if (PLUGIN_INPUT_CAPTURED()) {
-            keyboard.keyLayer.read = false;
-            keyboard.keyLeft.read = false;
-            keyboard.keyRight.read = false;
-            return;
+            // Presses belong to the plugin page; releases still reach the stock UI so held modifiers clear.
+            for (uint8_t i = 0; i < 16; i++) {
+                if (keyboard.keyLayer.changeState[i] == KEYSTATE_PRESS) keyboard.keyLayer.changeState[i] = KEYSTATE_NONE;
+                if (keyboard.keyLeft.changeState[i] == KEYSTATE_PRESS) keyboard.keyLeft.changeState[i] = KEYSTATE_NONE;
+                if (keyboard.keyRight.changeState[i] == KEYSTATE_PRESS) keyboard.keyRight.changeState[i] = KEYSTATE_NONE;
+            }
         }
 
         // 2. LAYER KEYPAD DISPATCH

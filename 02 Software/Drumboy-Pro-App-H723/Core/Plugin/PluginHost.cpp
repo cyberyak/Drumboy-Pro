@@ -13,7 +13,7 @@
 /* Settings ---------------------------------------------------------*/
 
 const uint16_t kPluginQueueSize                     = 128;              // Power of two
-const uint8_t  kPluginMaxCount                      = 16;               // Built-ins + Lua scripts
+const uint8_t  kPluginMaxCount                      = 8;
 const uint8_t  kPluginMaxEventsPerUpdate            = 32;               // Bounds main-loop time per pass
 const uint32_t kPluginFrameInterval                 = 33;               // ms (~30 fps)
 const char     kPluginConfigPath[]                  = "Plugins/plugins.txt";
@@ -98,12 +98,9 @@ static bool messageShown = false;
 static uint32_t messageTick = 0;
 
 void registerBuiltinPlugins();         // BuiltinPlugins.cpp
-#ifdef DRUMBOY_LUA
-void registerLuaPlugins(FIL& file);    // LuaPlugin.cpp
-#endif
 
 void pluginHost_message(const char* text, bool error) {
-    /// @brief Queues a one-line message (Lua print(), errors, manager status) for the top strip; the latest one wins.
+    /// @brief Queues a one-line message (errors, manager status) for the top strip; the latest one wins.
 
     strncpy(messageText, text, sizeof(messageText) - 1);
     messageText[sizeof(messageText) - 1] = '\0';
@@ -232,7 +229,7 @@ uint32_t pluginHost_getDroppedEvents() {
 /* Lifecycle --------------------------------------------------------*/
 
 void pluginHost_initialize(Controller& controller) {
-    /// @brief Registers built-in and Lua plugins, applies Plugins/plugins.txt and starts the enabled ones.
+    /// @brief Registers built-in plugins, applies Plugins/plugins.txt and starts the enabled ones.
     /// Called once after controller.initialize(). Borrows the controller's idle FIL (4 KB) and takes the
     /// keypad lock the controller uses around SD access.
 
@@ -241,9 +238,6 @@ void pluginHost_initialize(Controller& controller) {
 
     // 1. DISCOVER
     registerBuiltinPlugins();
-#ifdef DRUMBOY_LUA
-    registerLuaPlugins(file);
-#endif
 
     // 2. CONFIGURE
     loadConfig(file);
