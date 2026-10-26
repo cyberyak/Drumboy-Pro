@@ -19,6 +19,7 @@ User-facing overview: [docs/README.md](../../../../docs/README.md).
 | `PatternGen.cpp/.h` | Pattern engine (pure logic, host-testable) | [Generator.md](Generator.md#engine-patterngen) |
 | `KeyStepFx.cpp` | `keystep_fx`: MIDI processor for an external sequencer | [KeyStepFx.md](KeyStepFx.md) |
 | `MidiSplit.h` | MIDI-in split parser (pure logic, host-testable) | [KeyStepFx.md](KeyStepFx.md#how-the-split-works) |
+| `MidiMerge.h` | MIDI-out channel remap and note-rate limiter (pure logic, host-testable) | [KeyStepFx.md](KeyStepFx.md#how-the-merge-works) |
 
 Hook macros live in `Core/Library/Global/PluginHooks.h`; the profiler used by the CPU meter in `Core/Library/Global/Profiler.*`.
 
@@ -98,6 +99,7 @@ All are macros in `PluginHooks.h` that compile to nothing (or to a constant) in 
 | `PLUGIN_FILE_SAVE(file)` | `sd_saveFile`, after `EOF` | Append the CYBX block |
 | `PLUGIN_FILE_LOADED(file, path, ok)` | `sd_loadFile` | Read the CYBX block |
 | `PLUGIN_MIDI_RX(byte)` | `receiveMidiCommand`, UART RX interrupt, before the MIDI-IN mode check | KeyStep FX: true = plugin owns the byte, stock parser skips it |
+| `PLUGIN_MIDI_TX_DROP(data, len)` | `enqueueMidiTx`, inside its critical section | KeyStep FX: may point `data` at a remapped copy; true = drop |
 
 Adding a hook: add the macro in both branches of `PluginHooks.h`, call it from the stock code, then rebuild the `Stock` preset and check the binary is still identical to the official one.
 
@@ -172,5 +174,5 @@ pluginHost_register(builtin_stepFlash());
 - **Memory:** RAM_D1 is ~92% full. Put tables and buffers in DTCM: `static float table[N] __attribute__((section(".DTCMRAM")));` (zero at boot is not guaranteed — initialise in `onStart`). DTCM is CPU-only: never hand it to DMA (FatFs, LCD DMA).
 - **SD card:** the host borrows `controller.sd.file`; don't add another `FIL` (4 KB each). Never access the card from `onEvent` during playback-critical paths if avoidable.
 - **Names:** stock `Global.h` defines many globals (e.g. `sinTable`); prefix yours.
-- **Interrupts:** never call plugin code from a hook directly; push an event. Hooks that run in interrupts (`AUDIO_TAP`, `BEAT_GATE`, `MIDI_RX`) must be tiny and allocation-free.
+- **Interrupts:** never call plugin code from a hook directly; push an event. Hooks that run in interrupts (`AUDIO_TAP`, `BEAT_GATE`, `MIDI_RX`, `MIDI_TX_DROP`) must be tiny and allocation-free.
 - **Stock check:** after touching stock files, build `Stock` and compare against the official binary.

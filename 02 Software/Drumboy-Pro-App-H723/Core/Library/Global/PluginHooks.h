@@ -51,6 +51,7 @@ void pluginHost_beatColor(Lcd& lcd, uint8_t layer, uint8_t bank, uint8_t beatNum
 void pluginHost_fileSaved(FIL& file);
 void pluginHost_fileLoaded(FIL& file, const char* path, bool songLoaded);
 bool pluginHost_midiRx(uint8_t byte);
+bool pluginHost_midiTx(const uint8_t*& data, uint8_t len);
 
 #define PLUGIN_INIT(controller_)                    pluginHost_initialize(controller_)
 #define PLUGIN_UPDATE(controller_)                  pluginHost_update(controller_)
@@ -73,6 +74,9 @@ bool pluginHost_midiRx(uint8_t byte);
 #define PLUGIN_FILE_LOADED(file_, path_, ok_)       pluginHost_fileLoaded((file_), (path_), (ok_))
 // MIDI-in split (UART RX interrupt, every byte): true = a plugin owns the byte and the stock parser skips it.
 #define PLUGIN_MIDI_RX(byte_)                       pluginHost_midiRx(byte_)
+// MIDI-out filter (inside enqueueMidiTx's critical section): may point `data_` at a remapped copy;
+// true = drop the message. Messages a plugin sends itself bypass the filter.
+#define PLUGIN_MIDI_TX_DROP(data_, len_)            pluginHost_midiTx((data_), (len_))
 
 #else
 
@@ -89,6 +93,7 @@ bool pluginHost_midiRx(uint8_t byte);
 #define PLUGIN_FILE_SAVE(file_)                     ((void)0)
 #define PLUGIN_FILE_LOADED(file_, path_, ok_)       ((void)0)
 #define PLUGIN_MIDI_RX(byte_)                       (false)
+#define PLUGIN_MIDI_TX_DROP(data_, len_)            (false)
 
 #endif
 

@@ -1030,6 +1030,13 @@ bool Controller::enqueueMidiTx(const uint8_t* data, uint8_t len) {
     uint32_t primask = __get_PRIMASK();
     __disable_irq();
 
+    // 1b. PLUGIN OUTPUT FILTER
+    // KeyStep FX moves the Drumboy's messages off channels it owns (may repoint `data`; true = drop, reported as sent).
+    if (PLUGIN_MIDI_TX_DROP(data, len)) {
+        __set_PRIMASK(primask);
+        return true;
+    }
+
     // 2. OVERFLOW GUARD
     // Reject message when ring buffer has no free slot.
     uint8_t nextHead = (io.midi.txRingHead + 1) & (Midi::kTxRingSize - 1);

@@ -2321,7 +2321,11 @@ struct Midi {
     volatile bool rxClockPhaseValid                 = false;            // true only after 0xFA/0xFB seen; phase reference is reliable
     bool txStartPending                             = false;
 
+#ifdef DRUMBOY_PLUGINS
+    static constexpr uint8_t kTxRingSize            = 128;              // Room for a merged external sequencer (KeyStep FX); power of two
+#else
     static constexpr uint8_t kTxRingSize            = 32;
+#endif
     MidiTxMsg txRing[kTxRingSize]                   = {};
     volatile uint8_t txRingHead                     = 0;
     volatile uint8_t txRingTail                     = 0;
