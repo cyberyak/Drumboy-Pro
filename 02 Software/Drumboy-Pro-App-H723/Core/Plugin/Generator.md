@@ -24,7 +24,7 @@ Generating overwrites the **current song bank in memory**. Nothing touches the S
 | **LEFT / RIGHT** | History: back / forward through the last 8 generated patterns |
 | **CLEAR** | Undo the last change (one level) |
 | **UP / DOWN** or a layer key | Select a track (marker left of the row) |
-| **SELECT** | Lock / unlock the selected track — locked tracks are never changed |
+| **SELECT** | Lock / unlock the selected track — locked tracks are never changed (`TRACK nn LOCKED` / `UNLOCKED`) |
 | **COPY** | Selected track's role: AUTO → KICK → SNARE → … |
 | **SONG** | Phrase fill: off / every 2 / 4 / 8 bars |
 | **REC** | EVOLVE: off / every 4 / 8 bars |
@@ -82,6 +82,8 @@ Ticks: 800 per quarter note, 200 per 16th.
 
 Probability and exact velocity don't fit the stock beat format, so they are kept in a side table `StepMeta { tick, probability, gain }` per track × bank × beat (in DTCM). `PLUGIN_BEAT_GATE` looks it up just before a beat plays: it rolls the probability and multiplies the volume by `gain`. An entry only applies while the beat still starts at the stored tick, so beats edited by hand afterwards play normally.
 
+`writeTrack()` frees all of a track's fill slots before writing: stock `Bank::resetBeat()` marks the beat inactive before looking up the fill's owner, so it never frees the slot, and the 32 slots per bank would run out after a few regenerates.
+
 Undo keeps one copy of every track's bank and its meta (`undoBanks`, in DTCM). History keeps the last 8 settings + seeds + salts (not the beats) and regenerates.
 
 ## File format (CYBX block)
@@ -108,6 +110,8 @@ Payload (version 1, little-endian):
 Only beats that are still valid generated beats are written.
 
 Loading (`PLUGIN_FILE_LOADED`): the meta table is cleared, then the trailer is looked for in the last 12 bytes. If the magic matches and the length is sane (≤ 32 KB), the CRC is checked over the payload first and only then parsed. A CRC mismatch shows `FILE: GENERATOR DATA DAMAGED - BEATS LOADED WITHOUT PROBABILITY` and the beats load as plain beats. An unknown version is ignored.
+
+The stock loader re-quantizes every beat (`layerSong_setBeat`) and runs each beat to the next one. For every bank with records, `restoreTiming()` therefore rebuilds the track like `writeTrack()`: a loaded beat whose quantized start is within half a step of its record's tick goes back to that tick, generated ratchets get their one-16th length again, and fills are rebuilt. Beats without a record (edited by hand) keep their pattern and run to the next beat. If quantizing changed the order of the beats, the bank stays as the stock loader left it.
 
 Compatibility: stock firmware reads its fixed sections up to `EOF` and never looks further, so it loads these files normally. Saving with stock firmware rewrites the file without the block (beats kept, probability lost).
 

@@ -208,6 +208,9 @@ static void writeTrack(Controller& c, uint8_t track, uint8_t bank, const GenStep
         b.resetBeat(k);
         meta[track][bank][k] = {0, 0, 0};
     }
+    // Bank::resetBeat() deactivates the beat before looking up its fill owner, so it never frees the
+    // fill slot; the whole track is rewritten here, so free them all (else ratchets run out of slots)
+    for (BeatFill& fill : b.beatFillLibrary) fill.reset();
     b.lastActiveBeatNum = -1;
     b.playBeatNum = -1;
 
@@ -483,6 +486,64 @@ static bool metaValid(Controller& c, uint8_t track, uint8_t bank, uint8_t beat) 
     return (beat <= b.lastActiveBeatNum) && b.beatLibrary[beat].getActive() && (b.beatLibrary[beat].getStartInterval() == m.tick);
 }
 
+static void restoreTiming(Controller& c, uint8_t track, uint8_t bank) {
+    /// @brief After a File load, puts generated beats back at their saved ticks. The stock loader
+    /// re-quantizes every beat (layerSong_setBeat), which drops swing/humanize, stretches ratchets to
+    /// the next beat and moves the beats off the ticks their probability/velocity are keyed to.
+
+    struct Slot {
+        bool active, generated;
+        uint16_t start;
+        uint8_t type, pattern, time, level;
+    } slots[kBeatLibrarySize];
+
+    Bank& b = PluginAccess::layer(c, track).bankLibrary[bank];
+    uint16_t song = PluginAccess::songInterval(c);
+    int32_t previous = -1;
+    for (uint8_t k = 0; k < kBeatLibrarySize; k++) {
+        const Beat& beat = b.beatLibrary[k];
+        StepMeta& m = meta[track][bank][k];
+        Slot& slot = slots[k];
+        slot = {beat.getActive(), false, beat.getStartInterval(), beat.getFillType(), beat.getFillPattern(), beat.getFillTime(), beat.getFillLevel()};
+        if (slot.active && (m.probability != 0)) {
+            // The loaded beat is the saved one if quantizing moved it by less than half a step
+            int16_t moved = (int16_t)(slot.start - m.tick);
+            if ((moved > -(int16_t)(kGenTicksPerStep / 2)) && (moved < (int16_t)(kGenTicksPerStep / 2)) && (m.tick < song)) {
+                slot.start = m.tick;
+                slot.generated = true;
+            }
+        }
+        if (!slot.generated) m = {0, 0, 0};
+        if (slot.active) {
+            if ((int32_t)slot.start <= previous) return;  // Order changed (quantize collision): keep the stock load
+            previous = slot.start;
+        }
+    }
+
+    uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    for (uint8_t k = 0; k < kBeatLibrarySize; k++) b.resetBeat(k);
+    for (BeatFill& fill : b.beatFillLibrary) fill.reset();
+    for (uint8_t k = 0; k < kBeatLibrarySize; k++) {
+        const Slot& slot = slots[k];
+        if (!slot.active) continue;
+        uint16_t next = song;
+        for (uint8_t j = k + 1; j < kBeatLibrarySize; j++) {
+            if (slots[j].active) {
+                next = slots[j].start;
+                break;
+            }
+        }
+        // Generated ratchets fit in one 16th, as written by writeTrack(); everything else runs to the next beat
+        bool ratchet = slot.generated && (slot.type == 0) && (slot.pattern >= 3) && (slot.pattern <= 5);
+        uint16_t end = (ratchet && (next - slot.start > kGenTicksPerStep)) ? slot.start + kGenTicksPerStep : next;
+        b.setBeat(k, slot.start, end);
+        b.setBeatFill(k, slot.type, slot.pattern, slot.time, slot.level);
+    }
+    PluginAccess::recalculate(c, track, bank);
+    __set_PRIMASK(primask);
+}
+
 static void saveBlock(FIL& file) {
     ensureState();
     Controller& c = controller;
@@ -604,16 +665,22 @@ static void loadBlock(FIL& file, const char* path, bool songLoaded) {
         roleOverride[i] = ((roles[i] >= -1) && (roles[i] < ROLE_COUNT)) ? roles[i] : -1;
     }
 
-    // 4. RECORDS (applied only where the loaded beat matches)
+    // 4. RECORDS, THEN THE SAVED TIMING FOR EVERY BANK THAT HAS GENERATED BEATS
+    uint8_t touched[kGenTracks] = {};                                   // Bit per bank
     for (uint16_t n = 0; r.ok && (n < records); n++) {
         uint8_t record[7];
         r.get(record, sizeof(record));
         uint8_t t = record[0], b = record[1], k = record[2];
-        if (!r.ok || (t >= kGenTracks) || (b >= kBankLibrarySize) || (k >= kBeatLibrarySize)) continue;
+        if (!r.ok || (t >= kGenTracks) || (b >= kBankLibrarySize) || (k >= kBeatLibrarySize) || (record[3] == 0)) continue;
         meta[t][b][k] = {(uint16_t)(record[5] | (record[6] << 8)), record[3], record[4]};
-        if (!metaValid(c, t, b, k)) meta[t][b][k] = {0, 0, 0};
+        touched[t] |= (1u << b);
     }
     f_close(&file);
+    for (uint8_t t = 0; t < kGenTracks; t++) {
+        for (uint8_t b = 0; b < kBankLibrarySize; b++) {
+            if (touched[t] & (1u << b)) restoreTiming(c, t, b);
+        }
+    }
 }
 
 /* Open / Close -----------------------------------------------------*/
@@ -718,7 +785,10 @@ bool generator_handleEvent(const PluginEvent& e, Controller& c) {
         switch (e.b) {
             case KEY_UP: selected = (selected + kGenTracks - 1) % kGenTracks; break;
             case KEY_DOWN: selected = (selected + 1) % kGenTracks; break;
-            case KEY_ADD: locked[selected] = !locked[selected]; break;  // SELECT
+            case KEY_ADD:  // SELECT
+                locked[selected] = !locked[selected];
+                setStatus(false, "TRACK %02u %s", selected + 1, locked[selected] ? "LOCKED - GENERATING LEAVES IT AS IT IS" : "UNLOCKED");
+                break;
             case KEY_COPY: roleOverride[selected] = (roleOverride[selected] + 2 > ROLE_COUNT) ? -1 : roleOverride[selected] + 1; break;
             case KEY_CENTER: generateAll(c, false); break;  // GLOBAL
             case KEY_PASTE: generateAll(c, true); break;

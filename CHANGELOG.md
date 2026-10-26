@@ -20,6 +20,13 @@ Generator: saving, single-track re-roll, history, EVOLVE.
 - **LEFT / RIGHT**: history of the last 8 generated patterns (settings, seed and per-track re-rolls).
 - **REC**: EVOLVE every 4 or 8 bars while playing — a couple of unlocked tracks re-roll their per-bar details (new `mutation` value in the engine; the base groove stays). Runs with the generator page closed too.
 
+### Fixed
+- Loading a File with generated beats restores their **exact timing**: the stock loader snaps every beat to the quantize grid and stretches ratchets to the next beat, which dropped swing/humanize, made ratchets 4× longer and lost per-step probability/velocity (keyed to the original tick). The generator now puts its beats back from the extension block after the load.
+- **Ratchets no longer run out**: every regenerate leaked the track's fill slots (stock `Bank::resetBeat()` never frees a fill), so after a few GLOBAL/PASTE presses tracks got no ratchets at all. The generator now frees a track's fills when it rewrites it.
+- **Knobs 5–8** on plugin pages (generator, manager, show mode) turn as fast as knobs 1–4; they used the slow on/off resolution of the page underneath (3× more turning). Hook `PLUGIN_ENCODER_RESOLUTION`, compiled out in Stock.
+- **SELECT** in the generator confirms `TRACK nn LOCKED` / `UNLOCKED` (it showed nothing until the help line came back).
+- Manager: "PLUGIN AND FIRMWARE MANAGER" (the LCD font has no `&`).
+
 ### Changed
 - Phrase fill moved from LEFT/RIGHT to **SONG**.
 - Lanes are not redrawn behind the manager or show mode when EVOLVE changes a track (they are restored on exit).
