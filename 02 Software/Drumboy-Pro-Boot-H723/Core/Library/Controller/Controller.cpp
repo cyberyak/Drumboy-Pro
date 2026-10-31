@@ -600,16 +600,22 @@ FRESULT Controller::sd_deleteDirectory(const char *path) {
     FRESULT res;
     DIR dir;
     FILINFO fileInfo;
-    char file[64] = "";
+    char file[256] = "";
     bool listFile = true;
 
     res = f_opendir(&dir, path);
+    if (res != FR_OK) {
+        return res;
+    }
 
     while (listFile) {
         res = f_readdir(&dir, &fileInfo);
         if ((res == FR_OK) && (fileInfo.fname[0] != 0)) {
-            memset(file, 0x00, strlen(file));
-            sprintf((char *)file, "%s/%s", path, fileInfo.fname);
+            // Long file names can exceed the buffer; skip such entries instead of overflowing.
+            int len = snprintf(file, sizeof(file), "%s/%s", path, fileInfo.fname);
+            if ((len < 0) || ((size_t)len >= sizeof(file))) {
+                continue;
+            }
             (fileInfo.fattrib & AM_DIR) ? sd_deleteDirectory(file) : f_unlink(file);
         } else {
             listFile = false;
