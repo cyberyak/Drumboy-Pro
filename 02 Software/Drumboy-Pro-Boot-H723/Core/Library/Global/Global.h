@@ -23,6 +23,9 @@ const uint8_t kVersionMinor                         = 0x01;
 
 #define RAM_FIRMWARE_ADDRESS                        0xC0000000
 #define FLASH_FIRMWARE_ADDRESS                      0x08020000
+#define FLASH_FIRMWARE_END_ADDRESS                  0x08100000  // exclusive; app owns sectors 1-7 (896 KB)
+#define FLASH_SECTOR_INVALID                        0xFFFFFFFF
+#define FLASH_WORD_BYTES                            32          // STM32H72x/73x program unit (256 bits)
 
 ////////////////////////////////////////////////////////////////////////////////
 /* Stm32 Constants -----------------------------------------------------------*/
@@ -211,6 +214,7 @@ typedef enum {
     FW_ERROR_SIZE                                   = 0x04,
     FW_ERROR_CRC                                    = 0x05,
     FW_ERROR_VERIFY                                 = 0x06,
+    FW_ERROR_FLASH                                  = 0x07,
 } FwResult;
 
 ////////////////////////////////////////////////////////////////////////////////

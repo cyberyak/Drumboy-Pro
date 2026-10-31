@@ -30,6 +30,9 @@ class Controller {
     bool power;
     bool lcdTest;
 
+    bool lcdActive;   // LCD has been initialized and switched on
+    bool flashDirty;  // application flash was erased/written but not verified
+
    public:
 
     /* Lifecycle -------------------------------------------- */
@@ -53,7 +56,9 @@ class Controller {
 
     void initialize();
     void updateFirmware();
+    bool isApplicationValid();
     void startApplication();
+    void haltNoApplication();
 
     /* Crc Functions ------------------------------------------ */
 
@@ -62,8 +67,8 @@ class Controller {
     /* Flash Functions -------------------------------------- */
 
     uint32_t flash_getSector(uint32_t address);
-    uint32_t flash_eraseSector(uint32_t startSectorAddress, uint32_t wordSize);
-    uint32_t flash_writeData(uint32_t StartSectorAddress, uint32_t* data, uint32_t wordSize);
+    uint32_t flash_eraseSector(uint32_t startSectorAddress, uint32_t byteSize);
+    uint32_t flash_writeData(uint32_t StartSectorAddress, uint32_t* data, uint32_t byteSize);
     void flash_readData(uint32_t StartSectorAddress, uint32_t* data, uint32_t wordSize);
 
     /* Dac Functions ---------------------------------------- */

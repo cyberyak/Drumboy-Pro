@@ -53,7 +53,9 @@ int main(int argc, char *argv[]) {
 		printf("%d\n", crcValue);
 
 		ofstream target;
-		target.open(targetName);
+		// Binary mode is required: text mode on Windows expands 0x0A to 0x0D 0x0A,
+		// which corrupts the payload and makes the bootloader reject it (SIZE-CHECK).
+		target.open(targetName, ofstream::binary);
 
 		target << "RW_DRUMBOY_PRO_FIRMWARE ";
 
