@@ -3,22 +3,23 @@
 #
 #   run_sim.sh [card image] [simulator options...]
 #
-# Default card: ~/Projects/DrumBoy/sim-card/drumboy.img. Changes the firmware
-# makes (presets, saved files) are kept on the image; add --card-copy to start
-# from a fresh copy each time. A control socket (build/Simulator/sim.sock) is
-# open for Simulator/tools/simctl.
+# Default card: $DRUMBOY_SIM_CARD, else $DRUMBOY_SIM_DATA/drumboy.img
+# (~/Library/Application Support/DrumboySim/drumboy.img), see sim_env.sh.
+# Changes the firmware makes (presets, saved files) are kept on the image; add
+# --card-copy to start from a fresh copy each time. A control socket
+# (build/Simulator/sim.sock) is open for Simulator/tools/simctl.
 
 set -eu
-SIM_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-FW_DIR="$(dirname "$SIM_DIR")"
-CARD="$HOME/Projects/DrumBoy/sim-card/drumboy.img"
+source "$(dirname "$0")/sim_env.sh"
+CARD="$SIM_CARD"
 if [ $# -gt 0 ] && [ "${1#-}" = "$1" ]; then CARD="$1"; shift; fi
+sim_require_card "$CARD"
+CARD="$(cd "$(dirname "$CARD")" && pwd)/$(basename "$CARD")"
 
-ST="$HOME/Library/Application Support/stm32cube/bundles"
-export PATH="$ST/cmake/4.4.0+st.1/CMake.app/Contents/bin:$ST/ninja/1.13.2+st.1/bin:$PATH"
+sim_find_build_tools
 cd "$FW_DIR"
 [ -d build/Simulator ] || cmake --preset Simulator >/dev/null
 cmake --build --preset Simulator | grep -E 'error|FAILED' || true
 
-cd build/Simulator
+cd "$BUILD_DIR"
 exec Simulator/DrumboySim --card "$CARD" --control sim.sock "$@"

@@ -4,19 +4,34 @@ Runs the real firmware on macOS so changes can be checked without flashing: as a
 
 ## Build
 
+Needs CMake and Ninja on PATH (`brew install cmake ninja`, or the copies the STM32 VS Code extension bundles under `~/Library/Application Support/stm32cube/bundles/`; `run_sim.sh` finds those by itself). The first build fetches SDL3.
+
 ```sh
-export PATH="$HOME/Library/Application Support/stm32cube/bundles/cmake/4.4.0+st.1/CMake.app/Contents/bin:$HOME/Library/Application Support/stm32cube/bundles/ninja/1.13.2+st.1/bin:$PATH"
 cmake --preset Simulator
-cmake --build --preset Simulator          # -> build/Simulator/Simulator/DrumboySim (first build fetches SDL3)
+cmake --build --preset Simulator          # -> build/Simulator/Simulator/DrumboySim
 
 # SD card image from a folder with the card contents (once)
-Simulator/tools/make_card_image.sh ~/Projects/DrumBoy/sd-backup/2026-10-23 ~/Projects/DrumBoy/sim-card/drumboy.img
+Simulator/tools/make_card_image.sh <SD card folder> ~/Library/Application\ Support/DrumboySim/drumboy.img
 ```
+
+## Card images
+
+The images live outside the repo, so every checkout and worktree shares them. Defaults and overrides (`Simulator/tools/sim_env.sh`):
+
+| Variable | Default | Used for |
+|---|---|---|
+| `DRUMBOY_SIM_DATA` | `~/Library/Application Support/DrumboySim` | Folder for the two images below |
+| `DRUMBOY_SIM_CARD` | `$DRUMBOY_SIM_DATA/drumboy.img` | Card you play with (`run_sim.sh`; `DrumboySim` uses it when `--card` is not given) |
+| `DRUMBOY_SIM_TEST_CARD` | `$DRUMBOY_SIM_DATA/test.img` | Card the tests run on (`run_tests.sh`) |
+| `DRUMBOY_SD_BACKUP` | none | Folder with SD card contents, copied onto the test card when it does not exist yet |
+
+A card image given as the first argument of `run_sim.sh` / `run_tests.sh`, or `--card` for `DrumboySim`, wins over the variables. A missing image stops the script with a message saying how to make one.
 
 ## Window
 
 ```sh
-Simulator/tools/run_sim.sh                # builds if needed, opens the panel on ~/Projects/DrumBoy/sim-card/drumboy.img
+Simulator/tools/run_sim.sh                # builds if needed, opens the panel on the playing card
+Simulator/tools/run_sim.sh other.img      # on another card image
 Simulator/tools/run_sim.sh --card-copy    # same, but changes don't stay on the card image
 ```
 
@@ -43,15 +58,17 @@ SONG and KNOB are assigned to the bottom-left and bottom-right keys by keypad wi
 ## Test
 
 ```sh
+DRUMBOY_SD_BACKUP=<SD card folder> Simulator/tools/run_tests.sh   # first run: creates the test card
 Simulator/tools/run_tests.sh              # every Simulator/tests/*.sim, prints PASS/FAIL
+Simulator/tools/run_tests.sh card.img Simulator/tests/smoke.sim   # one test on another card
 ```
 
-Tests use their own card, `~/Projects/DrumBoy/sim-card/test.img` (made from the SD backup on first run, so your playing card's plugins and files don't affect results), and each test runs on a throwaway clone of it (`--card-copy`). The log, screenshots and WAVs go to `build/Simulator/test-output/<test>/`.
+Tests use their own card, `$DRUMBOY_SIM_TEST_CARD` (made from `$DRUMBOY_SD_BACKUP` on first run, so your playing card's plugins and files don't affect results), and each test runs on a throwaway clone of it (`--card-copy`). The log, screenshots and WAVs go to `build/Simulator/test-output/<test>/`.
 
 ### Interactive (step by step, e.g. from an AI session)
 
 ```sh
-cd build/Simulator && Simulator/DrumboySim --card ~/Projects/DrumBoy/sim-card/drumboy.img --card-copy \
+cd build/Simulator && Simulator/DrumboySim --card ~/Library/Application\ Support/DrumboySim/drumboy.img --card-copy \
     --delay-scale 0.2 --control sim.sock --out . &
 ../../Simulator/tools/simctl --socket sim.sock wait-ready "press RHYTHM" "screenshot rhythm.png" state
 ../../Simulator/tools/simctl --socket sim.sock quit

@@ -26,6 +26,7 @@ if [ -e "$IMAGE" ]; then
     exit 1
 fi
 
+mkdir -p "$(dirname "$IMAGE")"
 mkfile -n "$SIZE" "$IMAGE"
 DISK=$(hdiutil attach -nomount -imagekey diskimage-class=CRawDiskImage "$IMAGE" | head -1 | awk '{print $1}')
 cleanup() { hdiutil detach "$DISK" -quiet || true; }
