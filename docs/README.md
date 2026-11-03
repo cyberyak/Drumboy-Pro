@@ -74,7 +74,11 @@ Changes apply after a restart. A missing file, or a plugin not listed, means off
 
 ## Building
 
-Requirements: CMake and Ninja (the STM32 VS Code extension bundles them under `~/Library/Application Support/stm32cube/bundles/`) and the Arm GNU toolchain 14.2 (`~/Projects/DrumBoy/tools/arm-gnu-toolchain-14.2.rel1-darwin-arm64-arm-none-eabi`).
+Requirements: CMake and Ninja on PATH (the STM32 VS Code extension bundles them under `~/Library/Application Support/stm32cube/bundles/`) and the [Arm GNU toolchain](https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads) 14.2 (`arm-none-eabi`). `cmake/arm-none-eabi.cmake` looks for `arm-none-eabi-gcc` in this order:
+
+1. `ARM_TOOLCHAIN_DIR` (`-DARM_TOOLCHAIN_DIR=…` or environment variable): the unpacked toolchain folder, the one containing `bin/`
+2. `arm-gnu-toolchain-*-arm-none-eabi` in `tools/` inside the repo, or in `tools/` next to the repo checkout (handy with several worktrees side by side)
+3. `PATH`
 
 ```sh
 cd "02 Software/Drumboy-Pro-App-H723"

@@ -3,19 +3,29 @@
 #
 #   run_tests.sh [card image] [test.sim ...]
 #
-# Defaults: ~/Projects/DrumBoy/sim-card/test.img (made once from the SD card
-# backup, kept separate from the card you play with) and Simulator/tests/*.sim.
+# Defaults: $DRUMBOY_SIM_TEST_CARD, else $DRUMBOY_SIM_DATA/test.img
+# (~/Library/Application Support/DrumboySim/test.img, see sim_env.sh), and
+# Simulator/tests/*.sim. The test card is kept separate from the card you play
+# with; if it is missing it is made once from $DRUMBOY_SD_BACKUP.
 # Output (log, screenshots, recordings) goes to build/Simulator/test-output/<test>/.
-# Exit status is the number of failed tests.
+# Exit status is the number of failed tests, 100 if it could not start.
 
 set -u
-SIM_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-FW_DIR="$(dirname "$SIM_DIR")"
-BIN="$FW_DIR/build/Simulator/Simulator/DrumboySim"
-CARD="${1:-$HOME/Projects/DrumBoy/sim-card/test.img}"
-BACKUP="${DRUMBOY_SD_BACKUP:-$HOME/Projects/DrumBoy/sd-backup/2026-10-23}"
+source "$(dirname "$0")/sim_env.sh"
+BIN="$BUILD_DIR/Simulator/DrumboySim"
+CARD="${1:-$SIM_TEST_CARD}"
 if [ ! -f "$CARD" ]; then
+    BACKUP="${DRUMBOY_SD_BACKUP:-}"
+    if [ -z "$BACKUP" ] || [ ! -d "$BACKUP" ]; then
+        cat >&2 <<MSG
+error: test card not found: $CARD
+Set DRUMBOY_SD_BACKUP to a folder with the SD card contents to create it${BACKUP:+ ($BACKUP does not exist)},
+or pass a card image as the first argument, or set DRUMBOY_SIM_TEST_CARD / DRUMBOY_SIM_DATA.
+MSG
+        exit 100
+    fi
     echo "Creating test card $CARD from $BACKUP"
+    mkdir -p "$(dirname "$CARD")"
     "$SIM_DIR/tools/make_card_image.sh" "$BACKUP" "$CARD" >/dev/null || exit 100
 fi
 shift $(( $# > 0 ? 1 : 0 ))
@@ -23,14 +33,14 @@ TESTS=("$@")
 [ ${#TESTS[@]} -eq 0 ] && TESTS=("$SIM_DIR"/tests/*.sim)
 
 if [ ! -x "$BIN" ]; then
-    echo "Simulator not built: cmake --preset Simulator && cmake --build --preset Simulator" >&2
+    echo "error: simulator not built ($BIN). Build it: cmake --preset Simulator && cmake --build --preset Simulator" >&2
     exit 100
 fi
 
 failed=0
 for test in "${TESTS[@]}"; do
     name="$(basename "$test" .sim)"
-    out="$FW_DIR/build/Simulator/test-output/$name"
+    out="$BUILD_DIR/test-output/$name"
     rm -rf "$out" && mkdir -p "$out"
     if "$BIN" --card "$CARD" --card-copy --delay-scale 0.2 --out "$out" --script "$test" > "$out/log.txt" 2>&1; then
         echo "PASS $name"

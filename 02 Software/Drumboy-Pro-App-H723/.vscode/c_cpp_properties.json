@@ -11,7 +11,6 @@
                 "USE_HAL_DRIVER",
                 "USE_PWR_LDO_SUPPLY"
             ],
-            "compilerPath": "${userHome}/Projects/DrumBoy/tools/arm-gnu-toolchain-14.2.rel1-darwin-arm64-arm-none-eabi/bin/arm-none-eabi-gcc",
             "configurationProvider": "ms-vscode.cmake-tools",
             "compilerArgs": [
                 "-mcpu=cortex-m7",

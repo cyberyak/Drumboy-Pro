@@ -64,7 +64,8 @@ static void crashHandler(int sig, siginfo_t* info, void* context) {
 
 static void usage(const char* argv0) {
     printf("Usage: %s [options]\n", argv0);
-    printf("  --card IMAGE       raw FAT32 SD card image (Simulator/tools/make_card_image.sh)\n");
+    printf("  --card IMAGE       raw FAT32 SD card image (Simulator/tools/make_card_image.sh),\n");
+    printf("                     default $DRUMBOY_SIM_CARD, else no card\n");
     printf("  --card-copy        run on a temporary clone of the image, leaving it unchanged\n");
     printf("  --out DIR          directory for relative screenshot/record paths\n");
     printf("  --script FILE      run test commands from FILE (- = stdin), exit 0 if all pass\n");
@@ -112,6 +113,14 @@ int main(int argc, char** argv) {
     action.sa_flags = SA_RESETHAND | SA_SIGINFO;
     for (int sig : {SIGSEGV, SIGBUS, SIGABRT, SIGILL, SIGFPE}) sigaction(sig, &action, nullptr);
     if (!parseArgs(argc, argv)) return 2;
+    const char* envCard = getenv("DRUMBOY_SIM_CARD");
+    if (sim::options.cardImage.empty() && envCard && *envCard) sim::options.cardImage = envCard;
+    if (!sim::options.cardImage.empty() && access(sim::options.cardImage.c_str(), F_OK) != 0) {
+        fprintf(stderr, "sim: card image not found: %s\n"
+                        "     make one with Simulator/tools/make_card_image.sh, or pass --card / set DRUMBOY_SIM_CARD\n",
+                sim::options.cardImage.c_str());
+        return 1;
+    }
 
     sim::mapMemory();
     // A restart (NVIC_SystemReset) re-execs with the same arguments and keeps using the same clone

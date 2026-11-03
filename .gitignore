@@ -16,3 +16,6 @@ Release/
 
 # Rhino
 *.3dmbak
+
+# Local Arm GNU toolchain (see cmake/arm-none-eabi.cmake)
+/tools/
