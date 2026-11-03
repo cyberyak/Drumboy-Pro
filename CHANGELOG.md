@@ -10,9 +10,27 @@ Custom Drumboy Pro firmware by cyberyak (fork of [Randomwaves/Drumboy-Pro](https
 
 ## [Unreleased]
 
+## [1.01-cy.9]
+
+First release with the desktop simulator, the generator pages (GRIDS, EUCLID, STEP) and safety fixes ported from [daupuck/Drumboy-Pro-Moffe-Edition](https://github.com/daupuck/Drumboy-Pro-Moffe-Edition). It has none of the KeyStep FX work, which stays on `feature/keystep-fx`.
+
+### Added
+- **Desktop simulator** (macOS): the application firmware built for the host, with LCD, front panel (keyboard and mouse), audio, an SD-card image and a scripted test interface. See `02 Software/Drumboy-Pro-App-H723/Simulator/README.md` to build and run it.
+- Everything listed under 1.01-cy.8 below (it was never released on its own).
+
+### Fixed
+- Instrument file names over 25 characters overflowed into the folder name and broke the path.
+- A truncated or tiny WAV file could stall the device while loading.
+- When the SD card is full, saving now shows the save error instead of losing data quietly (short reads and writes count as errors). A failed system or encoder preset save is retried.
+- Other buffer overflows: deleting folders with long names, the SD debug text, an empty instrument name record.
+- Generator: reloading a File puts swung and humanized generated beats back at their saved ticks before their probability, level and trig condition are matched to them, so those are no longer dropped.
+
+### Bootloader (not part of the SD-card update)
+- The update is now fail safe: the app is checked before the bootloader jumps to it; it never jumps after a failed erase, write or verify (it shows NO VALID APPLICATION and retries on the next boot); it refuses to erase sector 0; and writes are bounded to the app region. The Windows firmware packager no longer corrupts files. To get this, flash the bootloader over SWD.
+
 ## [1.01-cy.8]
 
-OXI-style drum features, part 1: generator pages, Grids-style map, Euclidean tracks, trig conditions.
+Not released on its own; included in 1.01-cy.9. OXI-style drum features, part 1: generator pages, Grids-style map, Euclidean tracks, trig conditions.
 
 ### Added
 - **Generator pages**: press **STYLE** in the generator to cycle GEN → GRIDS → EUCLID → STEP (FILL + STYLE still closes). The bottom line shows each page's keys.

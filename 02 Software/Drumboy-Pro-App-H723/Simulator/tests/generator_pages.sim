@@ -1,0 +1,60 @@
+# Generator: open with FILL+STYLE, generate on GEN, visit GRIDS / EUCLID / STEP, play the result.
+
+wait-ready 30000
+wait-stable 500
+
+# Samples to hear: DRUMKIT, Load tab, slot 2 (as in kit_pattern.sim)
+press DRUMKIT
+wait-menu DRUMKIT 2000
+press RIGHT
+press UP
+press ADD
+wait-stable 300
+press ADD
+wait 1000
+wait-stable 500 20000
+
+press FILL+STYLE
+wait 300
+expect generator == 1
+screenshot gen.png
+
+# GEN: swing up, new seed and generate
+turn 3 10
+press PASTE
+wait-stable 300
+screenshot gen_generated.png
+
+# GRIDS, EUCLID, STEP pages (STYLE cycles), each with a knob edit
+press STYLE
+wait 200
+turn 0 5
+wait-stable 300
+screenshot grids.png
+press STYLE
+wait 200
+turn 1 3
+press LEFT
+wait-stable 300
+screenshot euclid.png
+press STYLE
+wait 200
+press RIGHT
+turn 0 2
+wait-stable 300
+screenshot step.png
+
+# Undo, then close and play
+press CLEAR
+wait 200
+press FILL+STYLE
+wait 300
+expect generator == 0
+press PLAYSTOP
+wait 500
+level 2000
+expect audio.peak > -40
+expect play == 1
+press PLAYSTOP
+warnings
+state
