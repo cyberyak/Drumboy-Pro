@@ -820,16 +820,16 @@
   </session>
 
   <files>
-    <file absolutePath="/Users/eeyurdakul/Desktop/Metronome/Metronome/Imported Files/Perc_HeadKnock_hi.wav" id="0" importerPrivateSettings="Compression:0:0;LargeFileSupport:0:0;SampleType:0:20;" mediaHandler="AmioWav" relativePath="Imported Files/Perc_HeadKnock_hi.wav"/>
-    <file absolutePath="/Users/eeyurdakul/Desktop/Metronome/Metronome/Imported Files/Perc_HeadKnock_lo.wav" id="1" importerPrivateSettings="Compression:0:0;LargeFileSupport:0:0;SampleType:0:20;" mediaHandler="AmioWav" relativePath="Imported Files/Perc_HeadKnock_lo.wav"/>
-    <file absolutePath="/Users/eeyurdakul/Desktop/Metronome/Metronome/Imported Files/Synth_Block_C_hi.wav" id="2" importerPrivateSettings="Compression:0:0;LargeFileSupport:0:0;SampleType:0:20;" mediaHandler="AmioWav" relativePath="Imported Files/Synth_Block_C_hi.wav"/>
-    <file absolutePath="/Users/eeyurdakul/Desktop/Metronome/Metronome/Imported Files/Synth_Block_C_lo.wav" id="3" importerPrivateSettings="Compression:0:0;LargeFileSupport:0:0;SampleType:0:20;" mediaHandler="AmioWav" relativePath="Imported Files/Synth_Block_C_lo.wav"/>
-    <file absolutePath="/Users/eeyurdakul/Desktop/Metronome/Metronome/Imported Files/Perc_Tongue_hi.wav" id="4" importerPrivateSettings="Compression:0:0;LargeFileSupport:0:0;SampleType:0:20;" mediaHandler="AmioWav" relativePath="Imported Files/Perc_Tongue_hi.wav"/>
-    <file absolutePath="/Users/eeyurdakul/Desktop/Metronome/Metronome/Imported Files/Perc_Tongue_lo.wav" id="5" importerPrivateSettings="Compression:0:0;LargeFileSupport:0:0;SampleType:0:20;" mediaHandler="AmioWav" relativePath="Imported Files/Perc_Tongue_lo.wav"/>
-    <file absolutePath="/Users/eeyurdakul/Desktop/Metronome/Metronome/Imported Files/Perc_Teeth_hi.wav" id="6" importerPrivateSettings="Compression:0:0;LargeFileSupport:0:0;SampleType:0:20;" mediaHandler="AmioWav" relativePath="Imported Files/Perc_Teeth_hi.wav"/>
-    <file absolutePath="/Users/eeyurdakul/Desktop/Metronome/Metronome/Imported Files/Perc_Teeth_lo.wav" id="7" importerPrivateSettings="Compression:0:0;LargeFileSupport:0:0;SampleType:0:20;" mediaHandler="AmioWav" relativePath="Imported Files/Perc_Teeth_lo.wav"/>
-    <file absolutePath="/Users/eeyurdakul/Desktop/Metronome/Metronome/Imported Files/Perc_Clap_hi.wav" id="8" importerPrivateSettings="Compression:0:0;LargeFileSupport:0:0;SampleType:0:20;" mediaHandler="AmioWav" relativePath="Imported Files/Perc_Clap_hi.wav"/>
-    <file absolutePath="/Users/eeyurdakul/Desktop/Metronome/Metronome/Imported Files/Perc_Clap_lo.wav" id="9" importerPrivateSettings="Compression:0:0;LargeFileSupport:0:0;SampleType:0:20;" mediaHandler="AmioWav" relativePath="Imported Files/Perc_Clap_lo.wav"/>
+    <file id="0" importerPrivateSettings="Compression:0:0;LargeFileSupport:0:0;SampleType:0:20;" mediaHandler="AmioWav" relativePath="Imported Files/Perc_HeadKnock_hi.wav"/>
+    <file id="1" importerPrivateSettings="Compression:0:0;LargeFileSupport:0:0;SampleType:0:20;" mediaHandler="AmioWav" relativePath="Imported Files/Perc_HeadKnock_lo.wav"/>
+    <file id="2" importerPrivateSettings="Compression:0:0;LargeFileSupport:0:0;SampleType:0:20;" mediaHandler="AmioWav" relativePath="Imported Files/Synth_Block_C_hi.wav"/>
+    <file id="3" importerPrivateSettings="Compression:0:0;LargeFileSupport:0:0;SampleType:0:20;" mediaHandler="AmioWav" relativePath="Imported Files/Synth_Block_C_lo.wav"/>
+    <file id="4" importerPrivateSettings="Compression:0:0;LargeFileSupport:0:0;SampleType:0:20;" mediaHandler="AmioWav" relativePath="Imported Files/Perc_Tongue_hi.wav"/>
+    <file id="5" importerPrivateSettings="Compression:0:0;LargeFileSupport:0:0;SampleType:0:20;" mediaHandler="AmioWav" relativePath="Imported Files/Perc_Tongue_lo.wav"/>
+    <file id="6" importerPrivateSettings="Compression:0:0;LargeFileSupport:0:0;SampleType:0:20;" mediaHandler="AmioWav" relativePath="Imported Files/Perc_Teeth_hi.wav"/>
+    <file id="7" importerPrivateSettings="Compression:0:0;LargeFileSupport:0:0;SampleType:0:20;" mediaHandler="AmioWav" relativePath="Imported Files/Perc_Teeth_lo.wav"/>
+    <file id="8" importerPrivateSettings="Compression:0:0;LargeFileSupport:0:0;SampleType:0:20;" mediaHandler="AmioWav" relativePath="Imported Files/Perc_Clap_hi.wav"/>
+    <file id="9" importerPrivateSettings="Compression:0:0;LargeFileSupport:0:0;SampleType:0:20;" mediaHandler="AmioWav" relativePath="Imported Files/Perc_Clap_lo.wav"/>
   </files>
 
   <audioDevice inputID="22222222-2222-2222-2222-22222222" outputID="11111111-1111-1111-1111-11111111">
