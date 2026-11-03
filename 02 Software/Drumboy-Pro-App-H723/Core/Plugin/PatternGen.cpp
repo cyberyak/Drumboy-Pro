@@ -199,6 +199,20 @@ GenRole gen_detectRole(const char* folder, const char* instrument, const char* s
 
 /* Generation -------------------------------------------------------*/
 
+// Room for every candidate step of the song (trimmed to the stock limits at the end)
+static GenStep workSteps[12 * 48] GEN_WORK_SECTION;  // 3.5 KB, CPU-only
+
+static uint8_t finishSteps(GenStep* candidates, uint16_t candidateCount, GenStep* out);
+
+static int32_t swungTick(uint16_t songStep, uint8_t s, const GenParams& p, uint32_t barSeed, uint8_t trackIndex, uint8_t bar,
+                         uint8_t humanizeScale) {
+    int32_t tick = (int32_t)songStep * kGenTicksPerStep;
+    if (s & 1) tick += ((int32_t)p.swing * 4) - 200;  // 50% straight .. 75% = +100 ticks
+    float spread = (rnd(barSeed, trackIndex, bar, s, RS_HUMAN_A) + rnd(barSeed, trackIndex, bar, s, RS_HUMAN_B) - 1.0f);
+    tick += (int32_t)(spread * p.humanize * 0.35f * humanizeScale * 0.01f);
+    return (tick < 0) ? 0 : tick;
+}
+
 static bool euclidHit(uint8_t step, uint8_t k, uint8_t n, uint8_t rotate) {
     if ((k == 0) || (n == 0)) return false;
     return (((step + rotate) % n) * k) % n < k;
@@ -220,10 +234,7 @@ uint8_t gen_generate(GenRole role, const GenParams& p, uint8_t stepsPerBar, uint
                      const uint32_t* occupied, GenStep* out) {
     const Recipe& r = kRecipes[p.style % STYLE_COUNT][role % ROLE_COUNT];
     const uint8_t fillLength = (stepsPerBar >= 8) ? 4 : stepsPerBar / 2;  // Last beat of the bar
-    uint8_t count = 0;
-
-    // Room for every candidate step of the song (trimmed to the stock limits at the end)
-    static GenStep candidates[12 * 48] GEN_WORK_SECTION;  // 3.5 KB, CPU-only
+    GenStep* candidates = workSteps;
     uint16_t candidateCount = 0;
 
     const uint32_t barSeed = p.seed ^ (p.mutation * 0x9E3779B9u);  // EVOLVE re-rolls details, not the groove
@@ -315,11 +326,7 @@ uint8_t gen_generate(GenRole role, const GenParams& p, uint8_t stepsPerBar, uint
             }
 
             // 6. TIMING: swing on every second 16th, humanize (scaled per role)
-            int32_t tick = (int32_t)songStep * kGenTicksPerStep;
-            if (s & 1) tick += ((int32_t)p.swing * 4) - 200;  // 50% straight .. 75% = +100 ticks
-            float spread = (rnd(barSeed, trackIndex, bar, s, RS_HUMAN_A) + rnd(barSeed, trackIndex, bar, s, RS_HUMAN_B) - 1.0f);
-            tick += (int32_t)(spread * p.humanize * 0.35f * r.humanizeScale * 0.01f);
-            if (tick < 0) tick = 0;
+            int32_t tick = swungTick(songStep, s, p, barSeed, trackIndex, bar, r.humanizeScale);
 
             GenStep& step = candidates[candidateCount++];
             step.tick = (uint16_t)tick;
@@ -329,6 +336,12 @@ uint8_t gen_generate(GenRole role, const GenParams& p, uint8_t stepsPerBar, uint
             step.weight = (uint8_t)clampi(anchor ? 100 : w, 0, 99);
         }
     }
+
+    return finishSteps(candidates, candidateCount, out);
+}
+
+static uint8_t finishSteps(GenStep* candidates, uint16_t candidateCount, GenStep* out) {
+    uint8_t count = 0;
 
     // 7. BUDGET: at most kGenMaxSteps beats, keeping the most important ones
     while (candidateCount > kGenMaxSteps) {
@@ -353,5 +366,177 @@ uint8_t gen_generate(GenRole role, const GenParams& p, uint8_t stepsPerBar, uint
     }
 
     for (uint16_t i = 0; i < candidateCount; i++) out[count++] = candidates[i];
+    return count;
+}
+
+/* Grids-style Map --------------------------------------------------*/
+// Own patterns: weight 0-100 per 16th step for kick, snare and hats. Columns (X) go from
+// minimal to busy, rows (Y) from straight (four-on-the-floor) via electro/funk to broken
+// (half-time, breaks). Steps play when their interpolated weight clears 100 - density.
+
+// clang-format off
+static const uint8_t kGridsMap[3][3][GRIDS_PARTS][16] = {
+    {   // Y0 STRAIGHT
+        {   // X0 minimal
+            {100,0,0,0, 100,0,0,0, 100,0,0,0, 100,0,0,0},
+            {0,0,0,0, 60,0,0,0, 0,0,0,0, 60,0,0,0},
+            {0,0,80,0, 0,0,80,0, 0,0,80,0, 0,0,80,0},
+        },
+        {   // X1 standard
+            {100,0,0,0, 100,0,0,10, 100,0,0,0, 100,0,20,0},
+            {0,0,0,0, 95,0,0,0, 0,0,0,0, 95,0,0,20},
+            {40,20,90,20, 40,20,90,20, 40,20,90,20, 40,20,90,50},
+        },
+        {   // X2 busy
+            {100,0,20,0, 100,0,30,40, 100,0,20,0, 100,30,50,30},
+            {0,10,0,20, 100,0,20,40, 0,30,0,20, 100,20,40,60},
+            {70,50,95,50, 70,60,95,50, 70,50,95,60, 70,60,95,70},
+        },
+    },
+    {   // Y1 ELECTRO / FUNK
+        {   // X0
+            {100,0,0,0, 0,0,70,0, 0,0,60,0, 0,0,0,0},
+            {0,0,0,0, 90,0,0,0, 0,0,0,0, 90,0,0,0},
+            {70,0,50,0, 70,0,50,0, 70,0,50,0, 70,0,50,0},
+        },
+        {   // X1
+            {100,0,0,80, 0,0,90,0, 0,0,85,0, 0,30,0,20},
+            {0,0,0,0, 100,0,0,20, 0,0,0,0, 100,0,0,30},
+            {90,50,70,50, 90,50,70,50, 90,50,70,50, 90,50,70,60},
+        },
+        {   // X2
+            {100,0,40,85, 0,30,90,20, 0,40,85,0, 30,60,0,40},
+            {0,20,0,30, 100,0,40,30, 0,50,20,30, 100,30,50,70},
+            {95,70,80,70, 95,70,85,70, 95,70,80,70, 95,75,85,80},
+        },
+    },
+    {   // Y2 BROKEN
+        {   // X0 half-time
+            {100,0,0,0, 0,0,0,0, 0,0,50,0, 0,0,0,0},
+            {0,0,0,0, 0,0,0,0, 90,0,0,0, 0,0,0,0},
+            {80,0,40,0, 80,0,40,0, 80,0,40,0, 80,0,40,0},
+        },
+        {   // X1 break
+            {100,0,80,0, 0,0,0,0, 0,0,90,85, 0,0,0,0},
+            {0,0,0,0, 100,0,0,50, 0,45,0,0, 100,0,0,50},
+            {90,20,80,20, 90,20,80,20, 90,20,80,20, 90,20,80,40},
+        },
+        {   // X2 busy break / two-step
+            {100,0,30,0, 0,0,0,40, 0,0,95,0, 0,30,0,0},
+            {0,30,0,0, 100,0,40,30, 0,60,0,40, 100,30,50,60},
+            {90,60,85,60, 90,60,85,65, 90,60,85,60, 90,65,85,75},
+        },
+    },
+};
+// clang-format on
+
+GridsPart gen_gridsPart(GenRole role) {
+    switch (role) {
+        case ROLE_KICK: return GRIDS_KICK;
+        case ROLE_SNARE:
+        case ROLE_CLAP:
+        case ROLE_RIM: return GRIDS_SNARE;
+        case ROLE_HAT_CLOSED:
+        case ROLE_HAT_OPEN:
+        case ROLE_RIDE:
+        case ROLE_SHAKER: return GRIDS_HATS;
+        default: return GRIDS_NONE;
+    }
+}
+
+static float gridsWeight(const GridsParams& g, GridsPart part, uint8_t step) {
+    // Bilinear interpolation between the four map nodes around (x, y)
+    float fx = g.x * 0.02f, fy = g.y * 0.02f;  // 0..2
+    uint8_t x0 = (fx >= 1.0f) ? 1 : 0, y0 = (fy >= 1.0f) ? 1 : 0;
+    float tx = fx - x0, ty = fy - y0;
+    float a = kGridsMap[y0][x0][part][step], b = kGridsMap[y0][x0 + 1][part][step];
+    float c = kGridsMap[y0 + 1][x0][part][step], d = kGridsMap[y0 + 1][x0 + 1][part][step];
+    return (a + (b - a) * tx) * (1.0f - ty) + (c + (d - c) * tx) * ty;
+}
+
+uint8_t gen_grids(GenRole role, const GridsParams& g, const GenParams& p, uint8_t stepsPerBar, uint8_t bars, uint8_t trackIndex,
+                  GenStep* out) {
+    GridsPart part = gen_gridsPart(role);
+    if (part == GRIDS_NONE) return 0;
+
+    // Variations of the shared hat line per role: open hat only on off-beats, ride and shaker a little sparser
+    int32_t bias = (role == ROLE_HAT_OPEN) ? -25 : (role == ROLE_RIDE) ? -10 : (role == ROLE_SHAKER) ? -15 : (role == ROLE_RIM) ? -20 : 0;
+    int32_t threshold = 100 - clampi((int32_t)g.density[part] + bias, 0, 100);
+    const uint32_t barSeed = p.seed ^ (p.mutation * 0x9E3779B9u);
+    GenStep* candidates = workSteps;
+    uint16_t candidateCount = 0;
+
+    for (uint8_t bar = 0; bar < bars; bar++) {
+        for (uint8_t s = 0; s < stepsPerBar; s++) {
+            if ((role == ROLE_HAT_OPEN) && ((s & 3) != 2)) continue;
+            uint16_t songStep = (uint16_t)bar * stepsPerBar + s;
+
+            // 1. WEIGHT: map + small per-seed offset + CHAOS jitter per bar
+            float base = gridsWeight(g, part, s % 16);
+            if (base <= 0.0f) continue;
+            // Strong map steps (90+) are the groove's backbone: CHAOS leaves them alone
+            bool anchor = (base >= 90.0f);
+            int32_t w = (int32_t)(base + (rnd(p.seed, trackIndex, 0xFFFF, s, RS_BASE) - 0.5f) * 10.0f);
+            if (!anchor) w += (int32_t)((rnd(barSeed, trackIndex, bar, s, RS_BAR) - 0.5f) * g.chaos * 0.5f);
+            if ((w <= 0) || (w < threshold)) continue;
+
+            // 2. VELOCITY: strong map steps are accents, spread by DYNAMICS
+            int32_t full = 60 + w * 67 / 100;
+            int32_t velocity = 127 - (127 - full) * p.dynamics / 100;
+            velocity += (int32_t)((rnd(barSeed, trackIndex, bar, s, RS_VEL) - 0.5f) * p.dynamics * 0.2f);
+
+            // 3. PROBABILITY: with CHAOS, steps close to the threshold may skip a loop
+            int32_t probability = 100;
+            if ((g.chaos > 0) && !anchor) {
+                int32_t margin = w - threshold;
+                int32_t zone = 5 + g.chaos / 4;
+                if (margin < zone) probability = 100 - (zone - margin) * g.chaos / zone * 6 / 10;
+            }
+
+            GenStep& step = candidates[candidateCount++];
+            step.tick = (uint16_t)swungTick(songStep, s, p, barSeed, trackIndex, bar, 100);
+            step.velocity = (uint8_t)clampi(velocity, 1, 127);
+            step.probability = (uint8_t)clampi(probability, 10, 100);
+            step.ratchet = 0;
+            step.weight = (uint8_t)clampi(w, 0, 100);
+        }
+    }
+    return finishSteps(candidates, candidateCount, out);
+}
+
+/* Euclidean Track --------------------------------------------------*/
+
+const char* const kGenRateNames[RATE_COUNT] = {"1/32", "1/16T", "1/16", "1/8T", "1/8", "1/4"};
+static const uint8_t kRateDivisions[RATE_COUNT] = {8, 6, 4, 3, 2, 1};  // Steps per quarter note
+
+uint8_t gen_euclid(const EuclidParams& e, uint16_t songTicks, GenStep* out, uint16_t* wanted) {
+    uint8_t count = 0;
+    uint16_t hits = 0;
+    if ((e.steps == 0) || (e.pulses == 0) || (e.rate >= RATE_COUNT)) {
+        if (wanted) *wanted = 0;
+        return 0;
+    }
+    const uint32_t division = kRateDivisions[e.rate];
+    for (uint32_t i = 0;; i++) {
+        uint32_t tick = i * 800u / division;  // 800 ticks per quarter note
+        if (tick >= songTicks) break;
+        uint8_t s = i % e.steps;
+        if (!euclidHit(s, e.pulses, e.steps, e.rotate)) continue;
+
+        // Index of this hit among the pattern's pulses, for evenly spread accents
+        uint8_t pulse = 0;
+        for (uint8_t k = 0; k < s; k++) pulse += euclidHit(k, e.pulses, e.steps, e.rotate);
+        bool accent = (e.accents > 0) && euclidHit(pulse, e.accents, e.pulses, 0);
+
+        hits++;
+        if (count >= kGenMaxSteps) continue;
+        GenStep& step = out[count++];
+        step.tick = (uint16_t)tick;
+        step.velocity = (uint8_t)clampi(((e.accents == 0) || accent) ? e.velocity : e.velocity * 6 / 10, 1, 127);
+        step.probability = (uint8_t)clampi(accent ? 100 : e.probability, 10, 100);
+        step.ratchet = 0;
+        step.weight = accent ? 100 : 50;
+    }
+    if (wanted) *wanted = hits;
     return count;
 }

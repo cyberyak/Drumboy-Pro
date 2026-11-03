@@ -42,7 +42,14 @@ Each track gets a role from its instrument folder (Kick, Snare, HHClosed, Cowbel
 | **COPY** | Change the selected track's role (AUTO → KICK → SNARE → …) |
 | **SONG** | Phrase fill: off / every 2 / 4 / 8 bars |
 | **REC** | EVOLVE: off / every 4 / 8 bars — while playing, a couple of unlocked tracks re-roll their details (ghosts, ratchets, extra hits) at that interval, keeping the groove; works with the generator closed too |
+| **STYLE** | Next page: GEN → GRIDS → EUCLID → STEP |
 | **FILE** (or FILL + STYLE) | Close |
+
+The table above is the **GEN** page. The other pages (the bottom line always shows the keys):
+
+- **GRIDS** — kick / snare / hats from an X/Y map. Knobs: X (minimal → busy), Y (straight → electro → broken), KICK, SNARE, HATS density, CHAOS (weaker hits change every loop), SWING, DYN. GLOBAL generates, then knobs change the drums live.
+- **EUCLID** — the selected track plays E(pulses, steps). Knobs: STEPS, PULSES, ROTATE, RATE, VELO, ACCENTS, PROB. Live; the track is locked so GEN/GRIDS keep it. LEFT/RIGHT rotate, PASTE random, MUTE releases it.
+- **STEP** — LEFT/RIGHT pick a beat (white). Knob 1 trig condition (1:2 … 8:8 = play on loop A of every B; FILL / NOT FILL; FIRST / NOT FIRST; PRE / NOT PRE), knob 2 probability, knob 3 level. Conditional beats are magenta. GLOBAL resets the step.
 
 Beat ticks are coloured by probability: track colour = always, **green** ≥ 70%, **yellow** ≥ 45%, **orange** ≥ 20%, **red** below. Ratchets use the stock fills, so the generator switches a track's **F** on when it gets ratchets.
 
