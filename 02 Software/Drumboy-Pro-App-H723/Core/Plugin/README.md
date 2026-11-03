@@ -2,7 +2,7 @@
 
 Plugins are native C++ classes compiled into the firmware. They are registered at boot, switched on per SD card (`Plugins/plugins.txt`), and run from the main loop — never inside an interrupt. Everything here is built only with `DRUMBOY_PLUGINS` (on in all presets except `Stock`).
 
-User-facing overview: [docs/README.md](../../../../docs/README.md).
+User-facing overview: [Features](../../../../docs/features.md); all docs: [docs/README.md](../../../../docs/README.md).
 
 ## Files in this folder
 
@@ -75,7 +75,7 @@ class Plugin {
 | `PLUGIN_EVENT_MIDI_IN` | byte (clock / active sensing filtered) | – | – | UART RX |
 | `PLUGIN_EVENT_MIDI_OUT` | status | data 1 | data 2 | MIDI send (clock filtered) |
 
-Key indices: see [docs/README.md → Key names](../../../../docs/README.md#key-names).
+Key indices: see [Getting started → Key names](../../../../docs/getting-started.md#key-names).
 
 ## Hooks into the stock firmware
 

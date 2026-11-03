@@ -18,7 +18,7 @@ STEP   12  NOTE L01 V127 #  345  KEY P1 K13 DN  ENC 2 +1   +14  MIDI IN 90 #  12
 | MIDI OUT | Last sent message (clock filtered) |
 | DROP | Events lost because the queue was full — should stay 0 |
 
-Key indices: see [docs/README.md → Key names](../../../../docs/README.md#key-names).
+Key indices: see [Getting started → Key names](../../../../docs/getting-started.md#key-names).
 
 Status: verified on device for step, note, keys and encoders; MIDI not yet tested.
 

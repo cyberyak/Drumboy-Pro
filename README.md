@@ -1,6 +1,62 @@
-# Drumboy Pro
+# Drumboy Pro: cyberyak firmware
 
-> **cyberyak fork:** custom firmware with plugins, a pattern generator and visuals — see [docs/README.md](docs/README.md) and [CHANGELOG.md](CHANGELOG.md).
+Custom firmware for the [Randomwaves Drumboy Pro](https://www.randomwaves.io) groovebox, built on the official open-source firmware. It adds a pattern generator, a plugin system with a built-in manager, audio-reactive visuals and a desktop simulator. With every plugin switched off it behaves exactly like stock.
+
+**Latest release:** [1.01-cy.9](https://github.com/cyberyak/Drumboy-Pro/releases/latest) · [Install guide](docs/getting-started.md) · [Documentation](docs/README.md) · [Changelog](CHANGELOG.md)
+
+![The firmware running in the desktop simulator](docs/images/simulator_panel.png)
+
+## What's new
+
+| | |
+|---|---|
+| ![Pattern generator, GRIDS page](docs/images/generator_grids.png) | ![Pattern generator, STEP page with trig conditions](docs/images/generator_step.png) |
+| **Pattern generator:** style-based patterns (GEN), a Grids-style X/Y map (GRIDS), Euclidean rhythms (EUCLID), and per-beat trig conditions, probability and level (STEP). Undo, history, EVOLVE, and everything is saved with your File. | **Trig conditions** in the style of Elektron and OXI: A:B, FILL, FIRST, PRE and their opposites. They work on generated and hand-made beats. |
+| ![Plugin & Firmware Manager](docs/images/manager_plugins.png) | ![Psychedelic visualizer](docs/images/visual_1.png) |
+| **Plugin & Firmware Manager:** switch plugins on and off, and install any firmware from the SD card, stock included, without a computer. | **Psychedelic visualizer:** full-screen visuals that react to the music, with 8 knobs to shape them. The sequencer keeps playing. |
+
+Also:
+- **Desktop simulator** for macOS: the real firmware with the front panel, sound and scripted tests. See [Simulator](docs/simulator.md).
+- **CPU Meter** and **Hook Monitor** plugins, and a plugin host with hooks for steps, notes, keys, knobs, MIDI and audio.
+- **Safety fixes** ported from [daupuck's fork](https://github.com/daupuck/Drumboy-Pro-Moffe-Edition), for long file names, truncated WAVs, full SD cards and a fail-safe bootloader update.
+- A `Stock` build that is byte-identical to the official firmware, which shows the hooks change nothing.
+
+More in the [feature tour](docs/features.md).
+
+## Install
+
+1. Download `Drumboy_Pro_Fw_01_01_cy09.bin` from the [latest release](https://github.com/cyberyak/Drumboy-Pro/releases/latest).
+2. Copy it to the root of the SD card. It must be the only firmware file there.
+3. Optional: copy `plugins.txt` to `Plugins/plugins.txt` on the card to switch plugins on.
+4. Power-cycle. The File menu then shows `CYBERYAK 1.01-CY.9` in the top-right corner.
+
+To go back to stock, do the same with the official `Drumboy_Pro_Fw_01_01.bin` (attached to every release), or use the manager. Back up your SD card first. Details: [Getting started](docs/getting-started.md).
+
+## Documentation
+
+| | |
+|---|---|
+| [Getting started](docs/getting-started.md) | Install, update, go back to stock, SD card layout, key names |
+| [Features](docs/features.md) | A tour of everything above, with screenshots |
+| [Simulator](docs/simulator.md) | Run and test the firmware on a Mac |
+| [Development](docs/development.md) | Build, version, release, memory budget, known issues |
+| [Plugin development guide](02%20Software/Drumboy-Pro-App-H723/Core/Plugin/README.md) | Write your own plugin |
+
+## Status
+
+- **Released:** 1.01-cy.9, the first release with the simulator, the generator pages and the safety fixes.
+- **In progress:** KeyStep Pro MIDI FX on [`feature/keystep-fx`](https://github.com/cyberyak/Drumboy-Pro/tree/feature/keystep-fx). It isn't in any release yet.
+
+## Credits
+
+Drumboy Pro hardware and firmware by [Randomwaves](https://www.randomwaves.io), released under the [MIT License](LICENSE). This fork is unofficial and not supported by Randomwaves. Safety fixes ported from [daupuck/Drumboy-Pro-Moffe-Edition](https://github.com/daupuck/Drumboy-Pro-Moffe-Edition). Upstream: [Randomwaves/Drumboy-Pro](https://github.com/Randomwaves/Drumboy-Pro).
+
+---
+
+<details open>
+<summary><b>Original Randomwaves README</b>, unchanged from <a href="https://github.com/Randomwaves/Drumboy-Pro">Randomwaves/Drumboy-Pro</a></summary>
+
+# Drumboy Pro
 
 📖 **[Developer Wiki](https://www.randomwaves.io/drumboy-pro/drumboy-pro-wiki.html)** — full hardware specs, schematics walkthrough, firmware architecture, DSP internals, and memory map.
 
@@ -88,3 +144,5 @@ Released under the [MIT License](LICENSE).
 - 💬 [Discord community](https://discord.gg/5atevNH6UU) — join the discussion
 - 🌐 [randomwaves.io](https://www.randomwaves.io)
 - ✉️ [hello@randomwaves.io](mailto:hello@randomwaves.io)
+
+</details>
