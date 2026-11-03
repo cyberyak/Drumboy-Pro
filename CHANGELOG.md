@@ -16,6 +16,7 @@ First release with the desktop simulator, the generator pages (GRIDS, EUCLID, ST
 
 ### Added
 - **Desktop simulator** (macOS): the application firmware built for the host, with LCD, front panel (keyboard and mouse), audio, an SD-card image and a scripted test interface. See `02 Software/Drumboy-Pro-App-H723/Simulator/README.md` to build and run it.
+- Simulator and build need no machine-specific paths: card images live in `~/Library/Application Support/DrumboySim` (override with `DRUMBOY_SIM_DATA`, `DRUMBOY_SIM_CARD`, `DRUMBOY_SIM_TEST_CARD`); the ARM toolchain comes from `ARM_TOOLCHAIN_DIR`, a `tools/` folder in or next to the checkout, or PATH.
 - Everything listed under 1.01-cy.8 below (it was never released on its own).
 
 ### Fixed
