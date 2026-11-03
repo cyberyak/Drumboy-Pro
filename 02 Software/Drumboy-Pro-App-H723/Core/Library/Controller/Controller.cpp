@@ -799,12 +799,12 @@ void Controller::loadSystemPreset() {
     if (f_open(&sd.file, "System/Preset/System.rwp", FA_READ | FA_WRITE) == FR_OK) {
         // 2. HEADER VERIFICATION
         // Validate file identity using preset reference header.
-        if (f_read(&sd.file, refRead, strlen(kSystemPresetRef), &sd.bytesread) == FR_OK) {
+        if (sd_read(refRead, strlen(kSystemPresetRef)) == FR_OK) {
             if (strncmp(kSystemPresetRef, refRead, strlen(kSystemPresetRef)) == 0) {
                 if (f_lseek(&sd.file, 25) == FR_OK) {
                     // 3. DATA RETRIEVAL
                     // Load persisted system preset payload into RAM buffer.
-                    if (f_read(&sd.file, dataSystemPreset, kSystemPresetDataSize, &sd.byteswritten) == FR_OK) {
+                    if (sd_read(dataSystemPreset, kSystemPresetDataSize) == FR_OK) {
                         // 4. MIXER/AMPLIFIER PARAMETER APPLY
                         // Apply persisted mixer and amplifier values through setter APIs.
                         mixer_setMasterVolume(dataSystemPreset[0]);
@@ -859,6 +859,7 @@ void Controller::saveSystemPreset() {
         // 1. CRITICAL SECTION ENTRY
         // Temporarily disable keyboard input during serialization.
         keyboard_disable();
+        bool saveFailed = false;
 
         // 2. CHANGE DETECTION
         // Continue only when preset save engine is active and dirty flag is set.
@@ -894,18 +895,23 @@ void Controller::saveSystemPreset() {
 
             // 4. SD CARD WRITE
             // Seek payload offset and write serialized preset data.
+            // A failed write keeps the dirty flag set so the next save cycle retries
+            // instead of silently dropping the change.
             if (f_open(&sd.file, "System/Preset/System.rwp", FA_READ | FA_WRITE) == FR_OK) {
                 // Seek to offset 25 (skipping the file header/magic number)
-                if (f_lseek(&sd.file, 25) == FR_OK) {
-                    f_write(&sd.file, dataSystemPreset, kSystemPresetDataSize, &sd.byteswritten);
+                if ((f_lseek(&sd.file, 25) != FR_OK) || (sd_write(dataSystemPreset, kSystemPresetDataSize) != FR_OK)) {
+                    saveFailed = true;
                 }
+                // f_close flushes the cached sector; its result is part of the write.
+                if (f_close(&sd.file) != FR_OK) saveFailed = true;
+            } else {
+                saveFailed = true;
             }
-            f_close(&sd.file);
         }
 
         // 5. CLEANUP & STATE RESET
-        // Clear save flag and restore keyboard input handling.
-        systemPresetSaveFlag = false;  // Clear the "dirty" flag
+        // Clear save flag (unless the write failed) and restore keyboard input handling.
+        systemPresetSaveFlag = saveFailed;  // Clear the "dirty" flag only on success
         keyboard_enable();             // Re-enable user interaction
     }
 }
@@ -920,14 +926,14 @@ void Controller::loadEncoderPreset() {
     if (f_open(&sd.file, "System/Preset/Encoder.rwp", FA_READ | FA_WRITE) == FR_OK) {
         // 2. HEADER VERIFICATION
         // Validate file identity using encoder preset reference header.
-        if (f_read(&sd.file, refRead, strlen(kEncoderPresetRef), &sd.bytesread) == FR_OK) {
+        if (sd_read(refRead, strlen(kEncoderPresetRef)) == FR_OK) {
             if (strncmp(kEncoderPresetRef, refRead, strlen(kEncoderPresetRef)) == 0) {
                 // 3. DATA RETRIEVAL
                 // Seek payload offset and load global encoder mapping data.
                 f_lseek(&sd.file, 25);
 
                 // Read the raw function mapping array into RAM
-                if (f_read(&sd.file, dataEncoderGlobalPreset, kEncoderGlobalPresetDataSize, &sd.byteswritten) == FR_OK) {
+                if (sd_read(dataEncoderGlobalPreset, kEncoderGlobalPresetDataSize) == FR_OK) {
                     // 4. MATRIX DISTRIBUTION
                     // Map flat preset array back into bank/encoder matrix.
                     for (uint8_t i = 0; i < kEncoderBankSize; i++) {  // For each Bank/Tab
@@ -941,9 +947,11 @@ void Controller::loadEncoderPreset() {
                             }
 
                             // 5. ACTIVE TAB INITIALIZATION
-                            // Apply mapping immediately for default bank at startup.
+                            // Apply mapping immediately for default bank at startup. Use the
+                            // validated matrix entry, not the raw file byte, so a corrupt preset
+                            // cannot push an out-of-range function ID into the encoder engine.
                             if (i == 0) {
-                                encoder_setGlobalFunction(i, j, (EncoderFunc)function);
+                                encoder_setGlobalFunction(i, j, encoderGlobalFunction[i][j]);
                             }
                         }
                     }
@@ -968,6 +976,7 @@ void Controller::saveEncoderPreset() {
         // 1. CRITICAL SECTION ENTRY
         // Temporarily disable keyboard input during serialization.
         keyboard_disable();
+        bool saveFailed = false;
 
         // 2. CHANGE DETECTION
         // Continue only when encoder save engine is active and dirty flag is set.
@@ -993,25 +1002,29 @@ void Controller::saveEncoderPreset() {
 
             // 5. FILE SYSTEM COMMIT
             // Write serialized global/local mapping payloads to SD file.
+            // A failed write keeps the dirty flag set so the next save cycle retries.
             if (f_open(&sd.file, "System/Preset/Encoder.rwp", FA_READ | FA_WRITE) == FR_OK) {
-                // Write Global data at offset 26 (skipping the 25-char header + 1 separator)
-                if (f_lseek(&sd.file, 25) == FR_OK) {
-                    f_write(&sd.file, dataEncoderGlobalPreset, kEncoderGlobalPresetDataSize, &sd.byteswritten);
+                // Write Global data at offset 25 (directly after the 25-char header)
+                if ((f_lseek(&sd.file, 25) != FR_OK) || (sd_write(dataEncoderGlobalPreset, kEncoderGlobalPresetDataSize) != FR_OK)) {
+                    saveFailed = true;
                 }
 
                 // Write Local data at offset 67
-                if (f_lseek(&sd.file, 67) == FR_OK) {
-                    f_write(&sd.file, dataEncoderLocalPreset, kEncoderLocalPresetDataSize, &sd.byteswritten);
+                if ((f_lseek(&sd.file, 67) != FR_OK) || (sd_write(dataEncoderLocalPreset, kEncoderLocalPresetDataSize) != FR_OK)) {
+                    saveFailed = true;
                 }
-            }
 
-            // Finalize FAT32 write sequence and release file handle.
-            f_close(&sd.file);
+                // Finalize FAT32 write sequence and release file handle.
+                // f_close flushes the cached sector; its result is part of the write.
+                if (f_close(&sd.file) != FR_OK) saveFailed = true;
+            } else {
+                saveFailed = true;
+            }
         }
 
         // 6. CLEANUP & STATE RESET
-        // Clear save flag and restore keyboard input handling.
-        encoderPresetSaveFlag = false;  // Reset the "dirty" flag
+        // Clear save flag (unless the write failed) and restore keyboard input handling.
+        encoderPresetSaveFlag = saveFailed;  // Reset the "dirty" flag only on success
         keyboard_enable();              // Restore user interaction
     }
 }
@@ -5013,7 +5026,7 @@ SdResult Controller::sd_loadImage(char* fileAddress, uint32_t paletteAddress, ui
         // 4.1 SIGNATURE VALIDATION
         if (f_read(&sd.file, signature, 10, &bytesRead) == FR_OK && strncmp(signature, "RW_IMAGE  ", 10) == 0) {
             // 4.2 METADATA VALIDATION
-            if (f_read(&sd.file, meta, 8, &bytesRead) == FR_OK) {
+            if (sd_read(meta, 8) == FR_OK) {
                 const uint16_t expectedDepth = (mode == RGB24) ? 24 : 16;
 
                 // Compare file header against requested UI parameters
@@ -5024,7 +5037,7 @@ SdResult Controller::sd_loadImage(char* fileAddress, uint32_t paletteAddress, ui
                         const uint32_t paletteByteSize = paletteSize * ((mode == RGB24) ? 3 : 2);
 
                         // Direct read into RAM at the palette pointer
-                        if (f_read(&sd.file, reinterpret_cast<void*>(paletteAddress), paletteByteSize, &bytesRead) == FR_OK) {
+                        if (sd_read(reinterpret_cast<void*>(paletteAddress), paletteByteSize) == FR_OK) {
                             // 4.4 PIXEL SECTION LOAD
                             if (f_read(&sd.file, marker, 3, &bytesRead) == FR_OK &&
                                 strncmp(marker, "_DA", 3) == 0) {
@@ -5113,9 +5126,9 @@ SdResult Controller::sd_getFileLibrary() {
         // Attempt to open the project file. If successful, verify the file header and occupancy marker.
         if (f_open(&sd.file, fileName, FA_READ) == FR_OK) {
             // Read the unique file reference string (kFileRef) to verify compatibility.
-            if (f_read(&sd.file, refRead, strlen(kFileRef), &sd.bytesread) == 0) {
+            if (sd_read(refRead, strlen(kFileRef)) == 0) {
                 // Read the single character status marker immediately following the header.
-                if (f_read(&sd.file, &data, 1, &sd.bytesread) == FR_OK) {
+                if (sd_read(&data, 1) == FR_OK) {
                     // 5. VALIDITY CHECK
                     // An asterisk '*' indicates that this project slot contains active user data.
                     if (data == '*') {
@@ -5169,9 +5182,9 @@ SdResult Controller::sd_getDrumkitLibrary() {
         // Attempt to open the drumkit file. If it exists, verify its internal marker.
         if (f_open(&sd.file, fileName, FA_READ) == FR_OK) {
             // Read the reference header string to ensure file type compatibility.
-            if (f_read(&sd.file, refRead, strlen(kDrumkitRef), &sd.bytesread) == 0) {
+            if (sd_read(refRead, strlen(kDrumkitRef)) == 0) {
                 // Read the occupancy marker character immediately after the header.
-                if (f_read(&sd.file, &data, 1, &sd.bytesread) == FR_OK) {
+                if (sd_read(&data, 1) == FR_OK) {
                     // 5. VALIDITY CHECK
                     // An asterisk '*' confirms this slot is active and contains user data.
                     if (data == '*') {
@@ -5261,7 +5274,7 @@ void Controller::sd_getInstLibrary() {
         // 9. HEADER SIGNATURE
         // Write the custom file identity string.
         const char header[] = "RW_DRUMBOY_INST          ";
-        f_write(&sd.file, header, 25, &sd.byteswritten);
+        sd_write(header, 25);
 
         // 10. DMA-SAFE BUFFERED DATA WRITE
         // Loop through sorted pointers, copying to aligned SRAM before writing to SD.
@@ -5271,12 +5284,12 @@ void Controller::sd_getInstLibrary() {
 
             // Step copy: SDRAM -> Aligned SRAM (CPU) -> SD Card (DMA)
             memcpy(safeBuffer, sourcePtr, kFileNameSize);
-            f_write(&sd.file, safeBuffer, kFileNameSize, &sd.byteswritten);
+            sd_write(safeBuffer, kFileNameSize);
         }
 
         // 11. EOF MARKER
         // Finalize the file structure with an End-Of-File identifier.
-        f_write(&sd.file, "EOF", 3, &sd.byteswritten);
+        sd_write("EOF", 3);
         f_close(&sd.file);
     }
 
@@ -5369,7 +5382,7 @@ void Controller::sd_getSampleLibrary() {
                 // 10. SIGNATURE WRITE
                 // Mark the file with the 'RW_DRUMBOY_SAMPLE' header.
                 const char header[] = "RW_DRUMBOY_SAMPLE        ";
-                f_write(&sd.file, header, 25, &sd.byteswritten);
+                sd_write(header, 25);
 
                 // 11. DMA-SAFE DATA BUFFERING
                 // Copy data from SDRAM to aligned SRAM before the SDMMC write to ensure stability.
@@ -5378,12 +5391,12 @@ void Controller::sd_getSampleLibrary() {
                     if (sourcePtr == nullptr) continue;
 
                     memcpy(safeBuffer, sourcePtr, kFileNameSize);
-                    f_write(&sd.file, safeBuffer, kFileNameSize, &sd.byteswritten);
+                    sd_write(safeBuffer, kFileNameSize);
                 }
 
                 // 12. EOF TERMINATION
                 // Close the metadata file with an EOF marker.
-                f_write(&sd.file, "EOF", 3, &sd.byteswritten);
+                sd_write("EOF", 3);
                 f_close(&sd.file);
             }
             totalSampleLibrarySize += sampleLibrarySize[i];
@@ -5421,11 +5434,11 @@ SdResult Controller::sd_checkFile(uint8_t fileNum_) {
     if (f_open(&sd.file, fileName, FA_READ) == FR_OK) {
         // 3. SIGNATURE VERIFICATION
         // Read the file header and compare it against the global kFileRef string.
-        if (f_read(&sd.file, refRead, strlen(kFileRef), &sd.bytesread) == FR_OK) {
+        if (sd_read(refRead, strlen(kFileRef)) == FR_OK) {
             if (strncmp(kFileRef, refRead, strlen(kFileRef)) == 0) {
                 // 4. OCCUPANCY CHECK
                 // If the signature matches, read the status byte. '*' denotes a saved project.
-                f_read(&sd.file, &data, 1, &sd.bytesread);
+                sd_read(&data, 1);
                 (data == '*') ? fileStatus = FILE_ACTIVE : fileStatus = FILE_INACTIVE;
             } else {
                 // 5. COMPATIBILITY HANDLING
@@ -5511,7 +5524,7 @@ SdResult Controller::sd_loadFile(uint8_t fileNum_) {
                 // 5.1 BLOCK READ
                 // Read fixed-size 512-byte chunks for efficient SD throughput.
                 for (uint16_t i = 0; i < readCountTotal; i++) {
-                    if (f_read(&sd.file, &dataRead, bufferByteSize, &sd.bytesread) != FR_OK) errorCount += 1;
+                    if (sd_read(&dataRead, bufferByteSize) != FR_OK) errorCount += 1;
                     for (uint16_t j = 0; j < bufferByteSize; j++) {
                         volatile uint8_t* writePtr = (volatile uint8_t*)(data + pointerOffset);
                         *writePtr = dataRead[j];
@@ -5523,7 +5536,7 @@ SdResult Controller::sd_loadFile(uint8_t fileNum_) {
                 // 5.2 TAIL READ
                 // Read the final partial block when payload is not aligned to 512 bytes.
                 if (remainderByteSize) {
-                    if (f_read(&sd.file, &dataRead, remainderByteSize, &sd.bytesread) != FR_OK) errorCount += 1;
+                    if (sd_read(&dataRead, remainderByteSize) != FR_OK) errorCount += 1;
                     for (uint16_t k = 0; k < remainderByteSize; k++) {
                         volatile uint8_t* writePtr = (volatile uint8_t*)(data + pointerOffset);
                         *writePtr = dataRead[k];
@@ -5670,7 +5683,7 @@ SdResult Controller::sd_loadFile(uint8_t fileNum_) {
                                 uint16_t searchCounter = 0;
                                 while (searchActive) {
                                     memset(searchName, 0x00, sizeof(searchName));
-                                    f_read(&sd.file, searchName, kFileNameSize, &sd.bytesread);
+                                    sd_read(searchName, kFileNameSize);
                                     if (strcmp(instName[i], searchName) == 0) {
                                         instNum[i] = searchCounter;
                                         instMissing[i] = false;
@@ -5713,7 +5726,7 @@ SdResult Controller::sd_loadFile(uint8_t fileNum_) {
                                 uint16_t searchCounter = 0;
                                 while (searchActive) {
                                     memset(searchName, 0x00, kFileNameSize);
-                                    f_read(&sd.file, searchName, kFileNameSize, &sd.bytesread);
+                                    sd_read(searchName, kFileNameSize);
                                     if (strcmp(sampleName[i], searchName) == 0) {
                                         sampleNum[i] = searchCounter;
                                         sampleMissing[i] = false;
@@ -5772,7 +5785,7 @@ SdResult Controller::sd_loadFile(uint8_t fileNum_) {
                     // 6.2 BLOCK READ
                     // Read fixed-size blocks to assemble one layer payload.
                     for (uint16_t i = 0; i < readCountTotal; i++) {
-                        if (f_read(&sd.file, &dataRead, bufferByteSize, &sd.bytesread) != FR_OK) errorCount += 1;
+                        if (sd_read(&dataRead, bufferByteSize) != FR_OK) errorCount += 1;
                         for (uint16_t j = 0; j < bufferByteSize; j++) {
                             volatile uint8_t* writePtr = (volatile uint8_t*)(data + pointerOffset);
                             *writePtr = dataRead[j];
@@ -5784,7 +5797,7 @@ SdResult Controller::sd_loadFile(uint8_t fileNum_) {
                     // 6.3 TAIL READ
                     // Read the final partial block when needed.
                     if (remainderByteSize) {
-                        if (f_read(&sd.file, &dataRead, remainderByteSize, &sd.bytesread) != FR_OK) errorCount += 1;
+                        if (sd_read(&dataRead, remainderByteSize) != FR_OK) errorCount += 1;
                         for (uint16_t k = 0; k < remainderByteSize; k++) {
                             volatile uint8_t* writePtr = (volatile uint8_t*)(data + pointerOffset);
                             *writePtr = dataRead[k];
@@ -6051,7 +6064,7 @@ SdResult Controller::sd_saveFile(uint8_t fileNum_) {
     // Write header, drumkit block, song blocks, and EOF marker.
     if (sd_checkFile(fileNum_) == SD_OK) {
         if (f_open(&sd.file, fileName, FA_WRITE | FA_CREATE_ALWAYS) == FR_OK) {
-            if (f_write(&sd.file, kFileRef, strlen(kFileRef), &sd.byteswritten) == FR_OK) {
+            if (sd_write(kFileRef, strlen(kFileRef)) == FR_OK) {
                 // 5.1 DRUMKIT BLOCK WRITE
                 // Stream encoded drumkit payload in 512-byte chunks.
                 const uint16_t writeByteSize = 512;
@@ -6060,14 +6073,14 @@ SdResult Controller::sd_saveFile(uint8_t fileNum_) {
                 uint32_t pointerOffset = 0;
                 uint32_t errorCount = 0;
                 for (uint16_t i = 0; i < writeCountTotal; i++) {
-                    if (f_write(&sd.file, (data + pointerOffset), writeByteSize, &sd.byteswritten) != FR_OK) errorCount += 1;
+                    if (sd_write((data + pointerOffset), writeByteSize) != FR_OK) errorCount += 1;
                     pointerOffset += 512;
                 }
 
                 // 5.2 DRUMKIT TAIL WRITE
                 // Write final non-512-aligned remainder.
                 if (remainderByteSize) {
-                    if (f_write(&sd.file, (data + pointerOffset), remainderByteSize, &sd.byteswritten) != FR_OK) errorCount += 1;
+                    if (sd_write((data + pointerOffset), remainderByteSize) != FR_OK) errorCount += 1;
                 }
 
                 // 5.3 SONG ENCODE + WRITE
@@ -6101,27 +6114,28 @@ SdResult Controller::sd_saveFile(uint8_t fileNum_) {
                     remainderByteSize = (kSongByteSize % writeByteSize);
                     pointerOffset = 0;
                     for (uint16_t i = 0; i < writeCountTotal; i++) {
-                        if (f_write(&sd.file, (data + pointerOffset), writeByteSize, &sd.byteswritten) != FR_OK) errorCount += 1;
+                        if (sd_write((data + pointerOffset), writeByteSize) != FR_OK) errorCount += 1;
                         pointerOffset += 512;
                     }
 
                     // Write song tail remainder
                     if (remainderByteSize) {
-                        if (f_write(&sd.file, (data + pointerOffset), remainderByteSize, &sd.byteswritten) != FR_OK) errorCount += 1;
+                        if (sd_write((data + pointerOffset), remainderByteSize) != FR_OK) errorCount += 1;
                     }
                 }
 
                 // 5.4 EOF COMMIT
                 // Commit EOF marker only when all previous writes succeeded.
                 if (errorCount == 0) {
-                    if (f_write(&sd.file, eof, strlen(eof), &sd.byteswritten) == FR_OK) {
+                    if (sd_write(eof, strlen(eof)) == FR_OK) {
                         result = SD_OK;
                         PLUGIN_FILE_SAVE(sd.file);  // Extension block after the stock EOF (stock loaders ignore it)
                     }
                 }
             }
         }
-        f_close(&sd.file);
+        // f_close flushes the last cached sector; a failure here means the file is incomplete.
+        if (f_close(&sd.file) != FR_OK) result = SD_ERROR;
     }
 
     // 6. INPUT RESTORATION
@@ -6160,7 +6174,7 @@ SdResult Controller::sd_clearFile(uint8_t fileNum_) {
         if (f_open(&sd.file, fileName, FA_WRITE | FA_CREATE_ALWAYS) == FR_OK) {
             // 4. HEADER WRITE
             // Write standard project signature header.
-            if (f_write(&sd.file, kFileRef, strlen(kFileRef), &sd.byteswritten) == FR_OK) {
+            if (sd_write(kFileRef, strlen(kFileRef)) == FR_OK) {
                 const uint16_t writeByteSize = 512;  // Chunk size for SD block writing
                 uint16_t writeCountTotal;
                 uint16_t remainderByteSize;
@@ -6175,14 +6189,14 @@ SdResult Controller::sd_clearFile(uint8_t fileNum_) {
                 writeCountTotal = (kDrumkitByteSize / writeByteSize);
                 remainderByteSize = (kDrumkitByteSize % writeByteSize);
                 for (uint16_t i = 0; i < writeCountTotal; i++) {
-                    if (f_write(&sd.file, (kDataDrumkit + pointerOffset), writeByteSize, &sd.byteswritten) != FR_OK) errorCount += 1;
+                    if (sd_write((kDataDrumkit + pointerOffset), writeByteSize) != FR_OK) errorCount += 1;
                     pointerOffset += 512;
                 }
 
                 // 5.2 DRUMKIT TAIL WRITE
                 // Write final non-512-aligned drumkit remainder.
                 if (remainderByteSize) {
-                    if (f_write(&sd.file, (kDataDrumkit + pointerOffset), remainderByteSize, &sd.byteswritten) != FR_OK) errorCount += 1;
+                    if (sd_write((kDataDrumkit + pointerOffset), remainderByteSize) != FR_OK) errorCount += 1;
                 }
 
                 // 5.3 SONG BLOCK WRITE
@@ -6192,27 +6206,28 @@ SdResult Controller::sd_clearFile(uint8_t fileNum_) {
                 for (uint8_t l = 0; l < kLayerLibrarySize; l++) {
                     pointerOffset = 0;
                     for (uint16_t i = 0; i < writeCountTotal; i++) {
-                        if (f_write(&sd.file, (kDataSong + pointerOffset), writeByteSize, &sd.byteswritten) != FR_OK) errorCount += 1;
+                        if (sd_write((kDataSong + pointerOffset), writeByteSize) != FR_OK) errorCount += 1;
                         pointerOffset += 512;
                     }
 
                     // 5.4 SONG TAIL WRITE
                     // Write final non-512-aligned song remainder.
                     if (remainderByteSize) {
-                        if (f_write(&sd.file, (kDataSong + pointerOffset), remainderByteSize, &sd.byteswritten) != FR_OK) errorCount += 1;
+                        if (sd_write((kDataSong + pointerOffset), remainderByteSize) != FR_OK) errorCount += 1;
                     }
                 }
 
                 // 5.5 EOF COMMIT
                 // Seal the file with EOF only if all previous writes succeeded.
                 if (errorCount == 0) {
-                    if (f_write(&sd.file, eof, strlen(eof), &sd.byteswritten) == FR_OK) {
+                    if (sd_write(eof, strlen(eof)) == FR_OK) {
                         result = SD_OK;
                     }
                 }
             }
         }
-        f_close(&sd.file);
+        // f_close flushes the last cached sector; a failure here means the file is incomplete.
+        if (f_close(&sd.file) != FR_OK) result = SD_ERROR;
     }
 
     // 6. INPUT RESTORATION
@@ -6244,11 +6259,11 @@ SdResult Controller::sd_checkDrumkit(uint8_t kitNum_) {
     if (f_open(&sd.file, drumkitName, FA_READ) == FR_OK) {
         // 3. SIGNATURE VERIFICATION
         // Read the file header and compare it against the global kDrumkitRef string.
-        if (f_read(&sd.file, refRead, strlen(kDrumkitRef), &sd.bytesread) == FR_OK) {
+        if (sd_read(refRead, strlen(kDrumkitRef)) == FR_OK) {
             if (strncmp(kDrumkitRef, refRead, strlen(kDrumkitRef)) == 0) {
                 // 4. OCCUPANCY CHECK
                 // If the signature matches, read the status byte. '*' denotes a saved drumkit.
-                f_read(&sd.file, &data, 1, &sd.bytesread);
+                sd_read(&data, 1);
                 (data == '*') ? drumkitStatus = FILE_ACTIVE : drumkitStatus = FILE_INACTIVE;
             } else {
                 // 5. COMPATIBILITY HANDLING
@@ -6316,7 +6331,7 @@ SdResult Controller::sd_loadDrumkit(uint8_t kitNum_) {
                 // 5.1 BLOCK READ
                 // Read fixed-size 512-byte chunks for efficient SD throughput.
                 for (uint16_t i = 0; i < readCountTotal; i++) {
-                    if (f_read(&sd.file, &dataRead, readByteSize, &sd.bytesread) != FR_OK) errorCount += 1;
+                    if (sd_read(&dataRead, readByteSize) != FR_OK) errorCount += 1;
                     for (uint16_t j = 0; j < readByteSize; j++) {
                         volatile uint8_t* writePtr = (volatile uint8_t*)(data + pointerOffset);
                         *writePtr = dataRead[j];
@@ -6328,7 +6343,7 @@ SdResult Controller::sd_loadDrumkit(uint8_t kitNum_) {
                 // 5.2 TAIL READ
                 // Read the final partial block when payload is not aligned to 512 bytes.
                 if (remainderByteSize) {
-                    if (f_read(&sd.file, &dataRead, remainderByteSize, &sd.bytesread) != FR_OK) errorCount += 1;
+                    if (sd_read(&dataRead, remainderByteSize) != FR_OK) errorCount += 1;
                     for (uint16_t k = 0; k < remainderByteSize; k++) {
                         volatile uint8_t* writePtr = (volatile uint8_t*)(data + pointerOffset);
                         *writePtr = dataRead[k];
@@ -6479,7 +6494,7 @@ SdResult Controller::sd_loadDrumkit(uint8_t kitNum_) {
                                 uint16_t searchCounter = 0;
                                 while (searchActive) {
                                     memset(searchName, 0x00, sizeof(searchName));
-                                    f_read(&sd.file, searchName, kFileNameSize, &sd.bytesread);
+                                    sd_read(searchName, kFileNameSize);
                                     if (strcmp(instName[i], searchName) == 0) {
                                         instNum[i] = searchCounter;
                                         instMissing[i] = false;
@@ -6522,7 +6537,7 @@ SdResult Controller::sd_loadDrumkit(uint8_t kitNum_) {
                                 uint16_t searchCounter = 0;
                                 while (searchActive) {
                                     memset(searchName, 0x00, kFileNameSize);
-                                    f_read(&sd.file, searchName, kFileNameSize, &sd.bytesread);
+                                    sd_read(searchName, kFileNameSize);
                                     if (strcmp(sampleName[i], searchName) == 0) {
                                         sampleNum[i] = searchCounter;
                                         sampleMissing[i] = false;
@@ -6779,7 +6794,7 @@ SdResult Controller::sd_saveDrumkit(uint8_t kitNum_) {
     // Write header, drumkit block, and EOF marker.
     if (sd_checkDrumkit(kitNum_) == SD_OK) {
         if (f_open(&sd.file, drumkitName, FA_WRITE | FA_CREATE_ALWAYS) == FR_OK) {
-            if (f_write(&sd.file, kDrumkitRef, strlen(kDrumkitRef), &sd.byteswritten) == FR_OK) {
+            if (sd_write(kDrumkitRef, strlen(kDrumkitRef)) == FR_OK) {
                 // 5.1 DRUMKIT BLOCK WRITE
                 // Stream encoded drumkit payload in 512-byte chunks.
                 const uint16_t writeByteSize = 512;
@@ -6788,26 +6803,27 @@ SdResult Controller::sd_saveDrumkit(uint8_t kitNum_) {
                 uint32_t pointerOffset = 0;
                 uint32_t errorCount = 0;
                 for (uint16_t i = 0; i < writeCountTotal; i++) {
-                    if (f_write(&sd.file, (data + pointerOffset), writeByteSize, &sd.byteswritten) != FR_OK) errorCount += 1;
+                    if (sd_write((data + pointerOffset), writeByteSize) != FR_OK) errorCount += 1;
                     pointerOffset += 512;
                 }
 
                 // 5.2 DRUMKIT TAIL WRITE
                 // Write final non-512-aligned remainder.
                 if (remainderByteSize) {
-                    if (f_write(&sd.file, (data + pointerOffset), remainderByteSize, &sd.byteswritten) != FR_OK) errorCount += 1;
+                    if (sd_write((data + pointerOffset), remainderByteSize) != FR_OK) errorCount += 1;
                 }
 
                 // 5.3 EOF COMMIT
                 // Commit EOF marker only when all previous writes succeeded.
                 if (errorCount == 0) {
-                    if (f_write(&sd.file, eof, strlen(eof), &sd.byteswritten) == FR_OK) {
+                    if (sd_write(eof, strlen(eof)) == FR_OK) {
                         result = SD_OK;
                     }
                 }
             }
         }
-        f_close(&sd.file);
+        // f_close flushes the last cached sector; a failure here means the file is incomplete.
+        if (f_close(&sd.file) != FR_OK) result = SD_ERROR;
     }
 
     // 6. INPUT RESTORATION
@@ -6846,7 +6862,7 @@ SdResult Controller::sd_clearDrumkit(uint8_t kitNum_) {
         if (f_open(&sd.file, drumkitName, FA_WRITE | FA_CREATE_ALWAYS) == FR_OK) {
             // 4. HEADER WRITE
             // Write standard drumkit signature header.
-            if (f_write(&sd.file, kDrumkitRef, strlen(kDrumkitRef), &sd.byteswritten) == FR_OK) {
+            if (sd_write(kDrumkitRef, strlen(kDrumkitRef)) == FR_OK) {
                 const uint16_t writeByteSize = 512;  // Block-aligned size for SD efficiency
                 const uint16_t drumkitByteSize = kDrumkitByteSize;
                 uint16_t writeCountTotal = (drumkitByteSize / writeByteSize);
@@ -6860,26 +6876,27 @@ SdResult Controller::sd_clearDrumkit(uint8_t kitNum_) {
                 // 5.1 DRUMKIT BLOCK WRITE
                 // Write default drumkit data in 512-byte chunks.
                 for (uint16_t i = 0; i < writeCountTotal; i++) {
-                    if (f_write(&sd.file, (kDataDrumkit + pointerOffset), writeByteSize, &sd.byteswritten) != FR_OK) errorCount += 1;
+                    if (sd_write((kDataDrumkit + pointerOffset), writeByteSize) != FR_OK) errorCount += 1;
                     pointerOffset += 512;
                 }
 
                 // 5.2 DRUMKIT TAIL WRITE
                 // Write final non-512-aligned drumkit remainder.
                 if (remainderByteSize) {
-                    if (f_write(&sd.file, (kDataDrumkit + pointerOffset), remainderByteSize, &sd.byteswritten) != FR_OK) errorCount += 1;
+                    if (sd_write((kDataDrumkit + pointerOffset), remainderByteSize) != FR_OK) errorCount += 1;
                 }
 
                 // 5.3 EOF COMMIT
                 // Seal the file with EOF only if all previous writes succeeded.
                 if (errorCount == 0) {
-                    if (f_write(&sd.file, eof, strlen(eof), &sd.byteswritten) == FR_OK) {
+                    if (sd_write(eof, strlen(eof)) == FR_OK) {
                         result = SD_OK;
                     }
                 }
             }
         }
-        f_close(&sd.file);
+        // f_close flushes the last cached sector; a failure here means the file is incomplete.
+        if (f_close(&sd.file) != FR_OK) result = SD_ERROR;
     }
 
     // 6. INPUT RESTORATION
@@ -7048,10 +7065,13 @@ FRESULT Controller::sd_deleteDirectory(const char* path) {
 
         // 4. PATH CONSTRUCTION
         // Build full child path from parent path + entry name.
-        int pathLen = strlen(path);
-        strcpy(pathBuffer, path);
-        pathBuffer[pathLen] = '/';
-        strcpy(&pathBuffer[pathLen + 1], fileInfo.fname);
+        // A long file name (up to 255 chars) plus the parent path can exceed the buffer;
+        // refuse rather than overflow the stack.
+        int pathLen = snprintf(pathBuffer, sizeof(pathBuffer), "%s/%s", path, fileInfo.fname);
+        if ((pathLen < 0) || ((size_t)pathLen >= sizeof(pathBuffer))) {
+            f_closedir(&dir);
+            return FR_INVALID_NAME;
+        }
 
         // 5. TYPE-SPECIFIC DELETION
         if (fileInfo.fattrib & AM_DIR) {
@@ -7095,11 +7115,35 @@ void Controller::sd_debug(const char* msg, FRESULT res) {
     // 2. ERROR STRING FORMATTING
     // Compose message + numeric FRESULT code into a single debug string.
     char buf[32];
-    sprintf(buf, "SD ERR: %s (%d)", msg, (int)res);
+    snprintf(buf, sizeof(buf), "SD ERR: %s (%d)", msg, (int)res);
 
     // 3. LCD OUTPUT
     // Draw the debug string at a fixed on-screen position.
-    lcd.drawText(buf, 32, 100, 100);
+    lcd.drawText(buf, strlen(buf), 100, 100);
+}
+
+FRESULT Controller::sd_write(const void* buffer, UINT size) {
+    /// @brief Writes `size` bytes to sd.file and treats a short write as failure.
+    /// FatFs returns FR_OK with fewer bytes written when the card is full, which would
+    /// otherwise leave a silently truncated file behind.
+
+    FRESULT result = f_write(&sd.file, buffer, size, &sd.byteswritten);
+    if ((result == FR_OK) && (sd.byteswritten != size)) {
+        result = FR_DENIED;  // FatFs convention for "volume full"
+    }
+    return result;
+}
+
+FRESULT Controller::sd_read(void* buffer, UINT size) {
+    /// @brief Reads `size` bytes from sd.file and treats a short read as failure.
+    /// Used for fixed-size headers and records, where hitting EOF early means the file is
+    /// truncated or corrupt and the buffer must not be trusted.
+
+    FRESULT result = f_read(&sd.file, buffer, size, &sd.bytesread);
+    if ((result == FR_OK) && (sd.bytesread != size)) {
+        result = FR_INT_ERR;
+    }
+    return result;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -19138,9 +19182,9 @@ void Controller::layerInst_setInstSelected(uint8_t layerNum_, int16_t inst_) {
             // 3. INSTRUMENT LIBRARY READ
             // Resolve instrument labels and derive file/folder paths.
             sprintf(layer.instSelectedData.num, "%04d", layer.instSelected + 1);
-            char temp[kFileNameSize + 1];
+            char temp[kFileNameSize + 1] = {};  // zero-filled: guarantees NUL even for a full 32-byte record
             f_close(&sd.file);
-            if ((f_open(&sd.file, "System/Data/Inst.lib", FA_READ) == FR_OK) && (f_lseek(&sd.file, 25 + (layer.instSelected * 32)) == FR_OK) && (f_read(&sd.file, temp, kFileNameSize, &sd.bytesread) == FR_OK)) {
+            if ((f_open(&sd.file, "System/Data/Inst.lib", FA_READ) == FR_OK) && (f_lseek(&sd.file, 25 + (layer.instSelected * 32)) == FR_OK) && (sd_read(temp, kFileNameSize) == FR_OK)) {
                 f_close(&sd.file);
 
                 // Construct file path
@@ -19250,7 +19294,7 @@ void Controller::layerInst_setSampleSelected(uint8_t layerNum_, int16_t sample_)
             sprintf(layer.sampleSelectedData.num, "%04d", layer.sampleSelected + 1);
             char temp[kFileNameSize + 1] = {};
             f_close(&sd.file);
-            if ((f_open(&sd.file, layer.instSelectedData.fileName, FA_READ) == FR_OK) && (f_lseek(&sd.file, 25 + (layer.sampleSelected * kFileNameSize)) == FR_OK) && (f_read(&sd.file, temp, kFileNameSize, &sd.bytesread) == FR_OK)) {
+            if ((f_open(&sd.file, layer.instSelectedData.fileName, FA_READ) == FR_OK) && (f_lseek(&sd.file, 25 + (layer.sampleSelected * kFileNameSize)) == FR_OK) && (sd_read(temp, kFileNameSize) == FR_OK)) {
                 f_close(&sd.file);
 
                 // Construct full file path
@@ -19261,7 +19305,9 @@ void Controller::layerInst_setSampleSelected(uint8_t layerNum_, int16_t sample_)
                 strncpy(layer.sampleSelectedData.nameLong, temp, kFileNameSize);
 
                 // Format short name
+                // strtok returns NULL for an empty record or a name made only of dots.
                 char* temp2 = strtok(temp, ".");
+                if (temp2 == NULL) temp2 = temp;
                 uint8_t length = strlen(temp2);
                 if (length > 10) {
                     strncpy(layer.sampleSelectedData.nameShortR, temp2, 9);
@@ -19280,7 +19326,7 @@ void Controller::layerInst_setSampleSelected(uint8_t layerNum_, int16_t sample_)
                 bool sampleReadError = false;
                 bool sampleTypeError = false;
                 if (f_open(&sd.file, layer.sampleSelectedData.fileName, FA_READ) == FR_OK) {
-                    if (f_read(&sd.file, &layer.wavSelectedData.riff_chunk, 12, &sd.bytesread) == FR_OK) {
+                    if (sd_read(&layer.wavSelectedData.riff_chunk, 12) == FR_OK) {
                         // Check riff header
                         if ((layer.wavSelectedData.riff_chunk.chunkId == 0x46464952) && (layer.wavSelectedData.riff_chunk.fileFormat == 0x45564157)) {
                             // Cap chunkSize to actual file size to guard against corrupt RIFF headers
@@ -19289,11 +19335,15 @@ void Controller::layerInst_setSampleSelected(uint8_t layerNum_, int16_t sample_)
                             uint32_t chunkSize = layer.wavSelectedData.riff_chunk.chunkSize + 8;
                             uint32_t fileSize = f_size(&sd.file);
                             if (chunkSize > fileSize) chunkSize = fileSize;
+                            // The searches below compute (chunkSize - 24) / (chunkSize - 8) in
+                            // unsigned arithmetic; a tiny or truncated file would wrap that to ~4e9
+                            // and stall. Clamp so such files fall through to the "invalid" path.
+                            if (chunkSize < 24) chunkSize = 24;
 
                                 // Search for fmt chunk
                             for (uint32_t i = 12; i < (chunkSize - 24); i++) {
                                     f_lseek(&sd.file, i);
-                                    f_read(&sd.file, &layer.wavSelectedData.fmt_chunk, 24, &sd.bytesread);
+                                    sd_read(&layer.wavSelectedData.fmt_chunk, 24);
                                 if (layer.wavSelectedData.fmt_chunk.chunkId == 0x20746D66) {
                                     layer.wavSelectedData.fmt_chunk.chunkStartByte = i;
                                     break;
@@ -19311,7 +19361,7 @@ void Controller::layerInst_setSampleSelected(uint8_t layerNum_, int16_t sample_)
                                 // Search for data chunk
                                 for (uint32_t j = 12; j < (chunkSize - 8); j++) {
                                     f_lseek(&sd.file, j);
-                                    f_read(&sd.file, &layer.wavSelectedData.data_chunk, 8, &sd.bytesread);
+                                    sd_read(&layer.wavSelectedData.data_chunk, 8);
                                     if (layer.wavSelectedData.data_chunk.chunkId == 0x61746164) {
                                         layer.wavSelectedData.data_chunk.chunkStartByte = j;
                                         break;

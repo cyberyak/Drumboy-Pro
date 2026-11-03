@@ -14,7 +14,10 @@ Controller::Controller()
 
       power(false),
 
-      lcdTest(false) {
+      lcdTest(false),
+
+      lcdActive(false),
+      flashDirty(false) {
 }
 
 Controller::~Controller() {}
@@ -32,7 +35,12 @@ void Controller::initialize() {
     updateFirmware();
 
     // 3. APPLICATION JUMP
-    // Jump to the application image after boot sequence.
+    // Only jump when the application flash is intact. After a failed program/verify the
+    // image may be erased or partial, so stay in the bootloader and tell the user instead
+    // of jumping into garbage (the package is kept on the SD card so the next boot retries).
+    if (flashDirty || !isApplicationValid()) {
+        haltNoApplication();
+    }
     startApplication();
 }
 
@@ -58,9 +66,10 @@ void Controller::updateFirmware() {
 
                     // 4. HEADER VALIDATION
                     // Verify file signature before reading metadata.
-                    if (f_read(&sd.file, data, 24, &sd.bytesread) == FR_OK) {
+                    if ((f_read(&sd.file, data, 24, &sd.bytesread) == FR_OK) && (sd.bytesread == 24)) {
                         lcd.initialize();
                         lcd.displayOn();
+                        lcdActive = true;
 
                         HAL_Delay(500);
 
@@ -69,19 +78,26 @@ void Controller::updateFirmware() {
 
                             // 5. METADATA LOAD + RANGE CHECKS
                             // Read version/size/CRC and validate compatibility/limits.
-                            if (f_read(&sd.file, data, 12, &sd.bytesread) == FR_OK) {
-                                uint16_t *versionMajor = (uint16_t *)&(data[0]);
-                                uint16_t *versionMinor = (uint16_t *)&(data[2]);
-                                uint32_t *firmwareSize = (uint32_t *)&(data[4]);
-                                uint32_t *crcRef = (uint32_t *)&(data[8]);
+                            // Fields are copied out with memcpy: casting into the char buffer is
+                            // unaligned access and breaks strict aliasing.
+                            if ((f_read(&sd.file, data, 12, &sd.bytesread) == FR_OK) && (sd.bytesread == 12)) {
+                                uint16_t versionMajor;
+                                uint16_t versionMinor;
+                                uint32_t firmwareSize;
+                                uint32_t crcRef;
+                                memcpy(&versionMajor, &data[0], sizeof(versionMajor));
+                                memcpy(&versionMinor, &data[2], sizeof(versionMinor));
+                                memcpy(&firmwareSize, &data[4], sizeof(firmwareSize));
+                                memcpy(&crcRef, &data[8], sizeof(crcRef));
 
+                                const uint32_t maxFirmwareSize = FLASH_FIRMWARE_END_ADDRESS - FLASH_FIRMWARE_ADDRESS;
                                 uint32_t readSize = 10240;
                                 uint32_t fileSize = f_size(&sd.file);
-                                uint16_t readCount = *firmwareSize / readSize;
-                                uint16_t remainder = *firmwareSize % readSize;
+                                uint16_t readCount = firmwareSize / readSize;
+                                uint16_t remainder = firmwareSize % readSize;
 
-                                if ((*versionMajor < 10) && (*versionMinor < 100)) {
-                                    if (((*firmwareSize + 36) == fileSize) && (*firmwareSize > 0) && (*firmwareSize < 917504)) {
+                                if ((versionMajor < 10) && (versionMinor < 100)) {
+                                    if (((firmwareSize + 36) == fileSize) && (firmwareSize > 0) && (firmwareSize <= maxFirmwareSize)) {
 
                                         // 6. PAYLOAD READ INTO SDRAM
                                         // Copy firmware payload from file to RAM staging area.
@@ -92,9 +108,13 @@ void Controller::updateFirmware() {
 
                                         // 7. CRC VALIDATION
                                         // Reject the staged payload before touching flash if its CRC doesn't match the header.
-                                        uint32_t crcValue = crc_update(0, (const void *)(RAM_FIRMWARE_ADDRESS), *firmwareSize);
+                                        uint32_t crcValue = crc_update(0, (const void *)(RAM_FIRMWARE_ADDRESS), firmwareSize);
 
-                                        if (crcValue == (*crcRef)) {
+                                        if (crcValue == crcRef) {
+                                            // Pad the staging buffer with erased-flash bytes up to the next
+                                            // 256-bit flashword so the final partial word is deterministic.
+                                            uint32_t paddedSize = ((firmwareSize + FLASH_WORD_BYTES - 1) / FLASH_WORD_BYTES) * FLASH_WORD_BYTES;
+                                            memset((uint8_t *)(RAM_FIRMWARE_ADDRESS + firmwareSize), 0xFF, paddedSize - firmwareSize);
 
                                             // 8. FLASH PROGRAM
                                             // Erase target sectors and write staged payload to flash.
@@ -121,19 +141,25 @@ void Controller::updateFirmware() {
                                             lcd.setFont(FONT_05x07);
                                             lcd.setAlignment(CENTER);
                                             char textVersion[7];
-                                            sprintf(textVersion, "V%01d.%02d", *versionMajor, *versionMinor);
+                                            snprintf(textVersion, sizeof(textVersion), "V%01u.%02u", versionMajor, versionMinor);
                                             lcd.drawText(textVersion, strlen(textVersion), 480, 338);
 
-                                            if (flash_eraseSector(FLASH_FIRMWARE_ADDRESS, fileSize / 4) == HAL_OK) {
+                                            // From here on the application image is no longer trustworthy
+                                            // until the post-write CRC passes.
+                                            flashDirty = true;
+                                            fwResult = FW_ERROR_FLASH;
+
+                                            if (flash_eraseSector(FLASH_FIRMWARE_ADDRESS, firmwareSize) == HAL_OK) {
                                                 HAL_Delay(250);
-                                                if (flash_writeData(FLASH_FIRMWARE_ADDRESS, (uint32_t *)(RAM_FIRMWARE_ADDRESS), (*firmwareSize) / 4) == HAL_OK) {
+                                                if (flash_writeData(FLASH_FIRMWARE_ADDRESS, (uint32_t *)(RAM_FIRMWARE_ADDRESS), firmwareSize) == HAL_OK) {
 
                                                     // 8b. POST-WRITE VERIFICATION
                                                     // Re-read the programmed flash region and recheck CRC before declaring success.
-                                                    uint32_t verifyCrc = crc_update(0, (const void *)(FLASH_FIRMWARE_ADDRESS), *firmwareSize);
+                                                    uint32_t verifyCrc = crc_update(0, (const void *)(FLASH_FIRMWARE_ADDRESS), firmwareSize);
 
-                                                    if (verifyCrc == (*crcRef)) {
+                                                    if (verifyCrc == crcRef) {
                                                         fwResult = FW_OK;
+                                                        flashDirty = false;
                                                         lcd.setForeColor(GREEN);
                                                         lcd.setBackColor(BLACK);
                                                         for (uint8_t i = 0; i < 200; i++) {
@@ -209,6 +235,10 @@ void Controller::updateFirmware() {
                                 lcd.drawText("VERIFY-CHECK", 12, 480, 360);
                                 break;
 
+                            case FW_ERROR_FLASH:
+                                lcd.drawText("FLASH-CHECK", 11, 480, 360);
+                                break;
+
                             default:
                                 break;
                             }
@@ -216,7 +246,9 @@ void Controller::updateFirmware() {
                     }
 
                     // 10. FILE FINALIZATION
-                    // Move successful package into archive folder, otherwise delete it.
+                    // Move successful package into archive folder. A package that failed validation is
+                    // deleted, but one that failed while programming flash is kept so the next boot
+                    // retries it (the application is already erased at that point).
                     f_close(&sd.file);
                     if (fwResult == FW_OK) {
                         sd_deleteDirectory("System/Firmware");
@@ -225,7 +257,7 @@ void Controller::updateFirmware() {
                         strcpy(fName, "System/Firmware/");
                         strcat(fName, sd.fileInfo.fname);
                         f_rename(sd.fileInfo.fname, fName);
-                    } else {
+                    } else if (!flashDirty) {
                         f_unlink(sd.fileInfo.fname);
                     }
                     HAL_Delay(2500);
@@ -233,6 +265,67 @@ void Controller::updateFirmware() {
                 }
             }
         }
+    }
+}
+
+bool Controller::isApplicationValid() {
+    /// @brief Sanity-checks the application vector table before jumping to it.
+
+    // 1. VECTOR TABLE READ
+    // Word 0 is the initial stack pointer, word 1 the reset handler.
+    uint32_t stackPointer = *(__IO uint32_t *)(FLASH_FIRMWARE_ADDRESS);
+    uint32_t resetHandler = *(__IO uint32_t *)(FLASH_FIRMWARE_ADDRESS + 4);
+
+    // 2. STACK POINTER CHECK
+    // Must be 8-byte aligned and inside DTCM (128 KB) or AXI SRAM / RAM_D1 (320 KB).
+    // Erased flash reads 0xFFFFFFFF and fails here.
+    bool stackOk = ((stackPointer & 0x7) == 0) &&
+                   (((stackPointer >= 0x20000000) && (stackPointer <= 0x20020000)) ||
+                    ((stackPointer >= 0x24000000) && (stackPointer <= 0x24050000)));
+
+    // 3. RESET HANDLER CHECK
+    // Must be a Thumb address (bit 0 set) located inside the application flash region.
+    uint32_t resetAddress = resetHandler & ~1UL;
+    bool resetOk = (resetHandler & 0x1) &&
+                   (resetAddress >= FLASH_FIRMWARE_ADDRESS + 8) &&
+                   (resetAddress < FLASH_FIRMWARE_END_ADDRESS);
+
+    return stackOk && resetOk;
+}
+
+void Controller::haltNoApplication() {
+    /// @brief Shows a permanent error and stays in the bootloader when no usable application exists.
+
+    // 1. DISPLAY BRING-UP
+    // The LCD is only initialized when a firmware package was found, so do it here if needed.
+    if (!lcdActive) {
+        lcd.initialize();
+        lcd.displayOn();
+        lcdActive = true;
+    }
+
+    // 2. ERROR SCREEN
+    lcd.drawSdFirmwareAlert(false);
+
+    lcd.setForeColor(RED);
+    lcd.setBackColor(BLACK);
+    lcd.setFont(FONT_07x09);
+    lcd.setAlignment(CENTER);
+    uint16_t xPos = 380;
+    uint16_t yPos = 412;
+    lcd.drawHLine(xPos, yPos, 200);
+    lcd.drawHLine(xPos, yPos + 24, 200);
+    lcd.drawHalfCircle(xPos - 1, yPos + 12, 12, 1);
+    lcd.drawHalfCircle(xPos + 200, yPos + 12, 12, 3);
+    lcd.drawText("  FIRMWARE ERROR  ", 18, 480, 420);
+
+    lcd.setFont(FONT_05x07);
+    lcd.drawText("NO VALID APPLICATION", 20, 480, 360);
+    lcd.drawText("COPY FIRMWARE TO SD AND RESTART", 31, 480, 338);
+
+    // 3. HALT
+    // Recovery path: put a firmware package on the SD card and power-cycle.
+    while (true) {
     }
 }
 
@@ -274,8 +367,9 @@ uint32_t Controller::crc_update(uint32_t initial, const void *buf, uint32_t len)
 
 uint32_t Controller::flash_getSector(uint32_t address) {
     // 1. ADDRESS-TO-SECTOR MAPPING
-    // Resolve STM32H7 flash sector from absolute address.
-    uint32_t sector = 0;
+    // Resolve STM32H7 flash sector from absolute address. Out-of-range addresses return
+    // FLASH_SECTOR_INVALID (previously 0, which silently aliased the bootloader's own sector).
+    uint32_t sector = FLASH_SECTOR_INVALID;
 
     if ((address >= 0x08000000) && (address < 0x08020000)) {
         sector = FLASH_SECTOR_0;
@@ -312,19 +406,32 @@ uint32_t Controller::flash_getSector(uint32_t address) {
     return sector;
 }
 
-uint32_t Controller::flash_eraseSector(uint32_t startSectorAddress, uint32_t wordSize) {
-    // 1. ERASE DESCRIPTOR SETUP
-    // Compute erase bounds and configure HAL erase struct.
+uint32_t Controller::flash_eraseSector(uint32_t startSectorAddress, uint32_t byteSize) {
+    // 1. ERASE BOUNDS
+    // Erase every sector touched by [start, start + byteSize). The end is computed from the
+    // last byte (inclusive) so an image ending exactly on a sector boundary does not spill
+    // into the next sector or past the end of flash. Never touch sector 0 (bootloader).
+    // Returns 0 on success, non-zero on failure.
+    if (byteSize == 0) {
+        return 1;
+    }
+
+    uint32_t startSector = flash_getSector(startSectorAddress);
+    uint32_t endSector = flash_getSector(startSectorAddress + byteSize - 1);
+
+    if ((startSector == FLASH_SECTOR_INVALID) || (endSector == FLASH_SECTOR_INVALID) ||
+        (startSector == FLASH_SECTOR_0) || (endSector < startSector)) {
+        return 1;
+    }
+
+    // 2. ERASE DESCRIPTOR SETUP
+    // Configure HAL erase struct.
     static FLASH_EraseInitTypeDef EraseInitStruct;
     uint32_t SECTORError;
 
-    // 2. FLASH UNLOCK + ERASE
+    // 3. FLASH UNLOCK + ERASE
     // Perform sector erase transaction.
     HAL_FLASH_Unlock();
-
-    uint32_t startSector = flash_getSector(startSectorAddress);
-    uint32_t endSectorAddress = startSectorAddress + (wordSize * 4);
-    uint32_t endSector = flash_getSector(endSectorAddress);
 
     EraseInitStruct.TypeErase = FLASH_TYPEERASE_SECTORS;
     EraseInitStruct.VoltageRange = FLASH_VOLTAGE_RANGE_3;
@@ -334,33 +441,41 @@ uint32_t Controller::flash_eraseSector(uint32_t startSectorAddress, uint32_t wor
 
     if (HAL_FLASHEx_Erase(&EraseInitStruct, &SECTORError) != HAL_OK) {
         HAL_FLASH_Lock();
-        return HAL_FLASH_GetError();
+        // HAL_FLASH_GetError() can be 0 on a timeout; never report that as success.
+        uint32_t error = HAL_FLASH_GetError();
+        return (error != 0) ? error : 1;
     }
 
-    // 3. FLASH RELOCK
+    // 4. FLASH RELOCK
     // Re-lock flash after erase operation.
     HAL_FLASH_Lock();
     return 0;
 }
 
-uint32_t Controller::flash_writeData(uint32_t startSectorAddress, uint32_t *data, uint32_t wordSize) {
+uint32_t Controller::flash_writeData(uint32_t startSectorAddress, uint32_t *data, uint32_t byteSize) {
     // 1. PROGRAM STRIDE SETUP
-    // 256 bits for STM32H72x/3X devices (8x 32-bit words).
+    // 256 bits for STM32H72x/3X devices (8x 32-bit words). The byte count is rounded up to
+    // whole flashwords so a size that is not a multiple of 4 or 32 still gets its tail
+    // written. The caller must provide a source buffer padded to that length.
+    // Returns 0 on success, non-zero on failure.
+    const uint32_t wordsPerFlashWord = FLASH_WORD_BYTES / 4;
+    uint32_t flashWordCount = (byteSize + FLASH_WORD_BYTES - 1) / FLASH_WORD_BYTES;
 
-    int sofar = 0;
-    uint8_t flashWord = 8;
+    if ((byteSize == 0) || (startSectorAddress < FLASH_FIRMWARE_ADDRESS) ||
+        (startSectorAddress + (flashWordCount * FLASH_WORD_BYTES) > FLASH_FIRMWARE_END_ADDRESS)) {
+        return 1;
+    }
 
     // 2. FLASHWORD PROGRAM LOOP
     // Program payload in flashword chunks.
     HAL_FLASH_Unlock();
 
-    while (sofar < wordSize) {
-        if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_FLASHWORD, startSectorAddress, (uint32_t)&data[sofar]) == HAL_OK) {
-            startSectorAddress += 4 * flashWord;
-            sofar += flashWord;
-        } else {
+    for (uint32_t i = 0; i < flashWordCount; i++) {
+        uint32_t address = startSectorAddress + (i * FLASH_WORD_BYTES);
+        if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_FLASHWORD, address, (uint32_t)&data[i * wordsPerFlashWord]) != HAL_OK) {
             HAL_FLASH_Lock();
-            return HAL_FLASH_GetError();
+            uint32_t error = HAL_FLASH_GetError();
+            return (error != 0) ? error : 1;
         }
     }
 
@@ -485,16 +600,22 @@ FRESULT Controller::sd_deleteDirectory(const char *path) {
     FRESULT res;
     DIR dir;
     FILINFO fileInfo;
-    char file[64] = "";
+    char file[256] = "";
     bool listFile = true;
 
     res = f_opendir(&dir, path);
+    if (res != FR_OK) {
+        return res;
+    }
 
     while (listFile) {
         res = f_readdir(&dir, &fileInfo);
         if ((res == FR_OK) && (fileInfo.fname[0] != 0)) {
-            memset(file, 0x00, strlen(file));
-            sprintf((char *)file, "%s/%s", path, fileInfo.fname);
+            // Long file names can exceed the buffer; skip such entries instead of overflowing.
+            int len = snprintf(file, sizeof(file), "%s/%s", path, fileInfo.fname);
+            if ((len < 0) || ((size_t)len >= sizeof(file))) {
+                continue;
+            }
             (fileInfo.fattrib & AM_DIR) ? sd_deleteDirectory(file) : f_unlink(file);
         } else {
             listFile = false;

@@ -148,7 +148,8 @@ extern "C" void System_Initialize() {
 extern "C" void Sdram_Initialize() {
     // Configure Sdram
     SDRAM_HandleTypeDef* hsdram = &hsdram1;
-    FMC_SDRAM_CommandTypeDef* Command;
+    FMC_SDRAM_CommandTypeDef command = {0};
+    FMC_SDRAM_CommandTypeDef* Command = &command;
 
     // 1. Clock Enable
     __IO uint32_t tmpmrd = 0;
