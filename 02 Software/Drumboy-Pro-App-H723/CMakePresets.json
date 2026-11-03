@@ -31,6 +31,7 @@
             "displayName": "Simulator (macOS desktop build, x86_64 via Rosetta)",
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/build/${presetName}",
+            "toolchainFile": "${sourceDir}/Simulator/cmake/host.cmake",
             "cacheVariables": {
                 "DRUMBOY_SIMULATOR": "ON",
                 "CMAKE_BUILD_TYPE": "Debug",

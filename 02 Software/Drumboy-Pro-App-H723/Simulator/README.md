@@ -4,7 +4,7 @@ Runs the real firmware on macOS so changes can be checked without flashing: as a
 
 ## Build
 
-Needs CMake and Ninja on PATH (`brew install cmake ninja`, or the copies the STM32 VS Code extension bundles under `~/Library/Application Support/stm32cube/bundles/`; `run_sim.sh` finds those by itself). The first build fetches SDL3.
+Needs CMake and Ninja: on PATH (`brew install cmake ninja`), or the copies the STM32 VS Code extension bundles under `~/Library/Application Support/stm32cube/bundles/`. `run_sim.sh` finds both bundles by itself; with a plain `cmake` the preset's toolchain file (`Simulator/cmake/host.cmake`) finds the bundled Ninja. The first build fetches SDL3.
 
 ```sh
 cmake --preset Simulator
